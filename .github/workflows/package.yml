@@ -1,0 +1,82 @@
+name: Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Run tests
+        run: python -m unittest discover -s tests
+
+      - name: Generate and validate sample diagram
+        run: |
+          mkdir -p output
+          python -m drawio_generator.cli \
+            --request "Create an enterprise architecture diagram for an Azure-hosted web application using AKS, Application Gateway WAF, Key Vault, PostgreSQL, GitHub Actions, Terraform, Prometheus, Grafana, and centralized logging." \
+            --input examples/azure-notes.md \
+            --output output \
+            --validate
+          python validation/validate_drawio.py output/diagram.drawio
+
+      - name: Build Microsoft 365 Copilot package
+        run: python platforms/ms365-copilot/package_ms365.py --output output/enterprise-drawio-diagrammer-ms365.zip
+
+      - name: Build skill archive
+        run: |
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          root = Path.cwd()
+          output = root / "output" / "enterprise-drawio-diagrammer.skill.zip"
+          excluded_dirs = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "output", ".venv", "venv"}
+          excluded_suffixes = {".pyc", ".pyo"}
+
+          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in sorted(root.rglob("*")):
+                  relative = path.relative_to(root)
+                  if path.is_dir():
+                      continue
+                  if any(part in excluded_dirs for part in relative.parts):
+                      continue
+                  if path.suffix in excluded_suffixes:
+                      continue
+                  archive.write(path, Path("enterprise-drawio-diagrammer") / relative)
+
+          print(f"Wrote {output}")
+          PY
+
+      - name: Upload skill archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-drawio-diagrammer-skill
+          path: output/enterprise-drawio-diagrammer.skill.zip
+          if-no-files-found: error
+
+      - name: Upload Microsoft 365 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-drawio-diagrammer-ms365
+          path: output/enterprise-drawio-diagrammer-ms365.zip
+          if-no-files-found: error

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.18/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.18",
+  "version": "1.0.0",
+  "id": "f7331da9-9a08-4b2c-bf79-2e66f432aa52",
+  "developer": {
+    "name": "Enterprise Draw.io Diagrammer",
+    "websiteUrl": "https://example.com",
+    "privacyUrl": "https://example.com/privacy",
+    "termsOfUseUrl": "https://example.com/terms"
+  },
+  "name": {
+    "short": "Draw.io Diagrammer",
+    "full": "Enterprise Draw.io Diagrammer"
+  },
+  "description": {
+    "short": "Create validated enterprise draw.io diagrams.",
+    "full": "A Microsoft 365 Copilot declarative agent that helps create enterprise architecture, cloud, Kubernetes, CI/CD, security, observability, and operations diagrams as draw.io XML with assumptions, unknowns, and validation guidance."
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "accentColor": "#2F6FED",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "enterpriseDrawioDiagrammer",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "validDomains": []
+}

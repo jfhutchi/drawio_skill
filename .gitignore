@@ -1,0 +1,44 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+*.whl
+*.tar.gz
+*.zip
+!platforms/ms365-copilot/appPackage/*.png
+
+# Local environments and secrets
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Generated diagram outputs
+output/*
+!output/.gitkeep
+enterprise-drawio-diagrammer-ms365.zip
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local install/test scratch
+tmp/
+temp/
+.tmp/

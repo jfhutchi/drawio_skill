@@ -1,0 +1,4 @@
+Create an enterprise architecture diagram for an Azure application using Azure Front Door, Application Gateway WAF, AKS, Key Vault, Azure Database for PostgreSQL, Azure Monitor, Log Analytics, GitHub Actions, Terraform, and private endpoints.
+
+Audience: architect.
+Show boundaries for the Azure subscription, ingress path, application runtime, data layer, security controls, CI/CD, and observability. Include assumptions, unknowns, and suggested follow-up diagrams.

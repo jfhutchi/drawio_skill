@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Enterprise Draw.io Diagram Model",
+  "type": "object",
+  "required": ["title", "diagram_type", "audience", "nodes", "edges"],
+  "properties": {
+    "title": {"type": "string", "minLength": 1},
+    "subtitle": {"type": "string"},
+    "diagram_type": {"type": "string"},
+    "audience": {"type": "string"},
+    "direction": {"type": "string"},
+    "layout_strategy": {"type": "string"},
+    "layers": {"type": "array", "items": {"type": "string"}},
+    "groups": {"type": "array", "items": {"type": "string"}},
+    "boundaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": {"type": "string"},
+          "label": {"type": "string"},
+          "boundary_type": {"type": "string"},
+          "description": {"type": "string"},
+          "metadata": {"type": "object"}
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "properties": {
+          "id": {"type": "string"},
+          "label": {"type": "string"},
+          "node_type": {"type": "string"},
+          "icon": {"type": ["string", "null"]},
+          "group": {"type": ["string", "null"]},
+          "layer": {"type": ["string", "null"]},
+          "description": {"type": ["string", "null"]},
+          "technology": {"type": ["string", "null"]},
+          "risk_level": {"type": ["string", "null"]},
+          "metadata": {"type": "object"}
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "target", "label"],
+        "properties": {
+          "id": {"type": "string"},
+          "source": {"type": "string"},
+          "target": {"type": "string"},
+          "label": {"type": "string"},
+          "protocol": {"type": ["string", "null"]},
+          "direction": {"type": "string"},
+          "data_classification": {"type": ["string", "null"]},
+          "security_control": {"type": ["string", "null"]},
+          "style": {"type": ["string", "null"]},
+          "metadata": {"type": "object"}
+        }
+      }
+    },
+    "legends": {"type": "array"},
+    "annotations": {"type": "array"},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "sources": {"type": "array", "items": {"type": "string"}},
+    "quality_checks": {"type": "array", "items": {"type": "string"}}
+  }
+}

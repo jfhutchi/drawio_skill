@@ -1,0 +1,52 @@
+diagram:
+  title: ""
+  subtitle: ""
+  type: enterprise
+  audience: architect
+  direction: top-to-bottom
+  layout_strategy: layered
+  layers:
+    - users
+    - edge
+    - application
+    - data
+    - platform
+    - security
+    - observability
+    - operations
+  groups: []
+  boundaries:
+    - id: boundary-example
+      label: Example Trust Boundary
+      boundary_type: trust
+      description: Replace with cloud, network, environment, ownership, or security boundary.
+  nodes:
+    - id: component-example
+      label: Example Component
+      type: api
+      icon: api
+      group: boundary-example
+      layer: application
+      description: Replace with purpose and ownership.
+      technology: ""
+      risk_level: ""
+      metadata: {}
+  edges:
+    - id: edge-example
+      source: component-example
+      target: another-component
+      label: HTTPS request
+      protocol: HTTPS
+      direction: forward
+      data_classification: internal
+      security_control: TLS
+      style: ""
+      metadata: {}
+  legends:
+    - label: Blue
+      meaning: Application, platform, and network services
+  annotations: []
+  assumptions: []
+  unknowns: []
+  sources: []
+  quality_checks: []

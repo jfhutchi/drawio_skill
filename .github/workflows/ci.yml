@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: python -m pip install -e .
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+
+      - name: Generate sample diagram
+        run: |
+          mkdir -p output
+          python -m drawio_generator.cli \
+            --request "Create an enterprise architecture diagram for an Azure-hosted web application using AKS, Application Gateway WAF, Key Vault, PostgreSQL, GitHub Actions, Terraform, Prometheus, Grafana, and centralized logging." \
+            --input examples/azure-notes.md \
+            --output output \
+            --validate
+
+      - name: Validate sample draw.io file
+        run: python validation/validate_drawio.py output/diagram.drawio
+
+      - name: Check installer dry run
+        run: python install.py --all-local --dry-run
+
+      - name: Validate JSON manifests
+        run: |
+          python -m json.tool schemas/diagram-model.schema.json > /dev/null
+          python -m json.tool platforms/ms365-copilot/appPackage/manifest.json > /dev/null
+          python -m json.tool platforms/ms365-copilot/appPackage/declarativeAgent.json > /dev/null
+
+      - name: Build Microsoft 365 package
+        run: python platforms/ms365-copilot/package_ms365.py --output output/enterprise-drawio-diagrammer-ms365.zip

@@ -1,0 +1,20 @@
+{
+  "name": "enterprise",
+  "background": "#ffffff",
+  "fontFamily": "Helvetica",
+  "fontColor": "#212529",
+  "colors": {
+    "application": "#dae8fc",
+    "security": "#e1d5e7",
+    "operations": "#d5e8d4",
+    "data": "#fff2cc",
+    "infrastructure": "#f5f5f5",
+    "risk": "#f8cecc"
+  },
+  "rules": [
+    "Use red only for risk, error, or blocked paths.",
+    "Use green only for healthy operations or approved workflow states.",
+    "Use dashed outlines for trust, environment, cloud, or ownership boundaries.",
+    "Keep labels readable and avoid unnecessary acronyms."
+  ]
+}

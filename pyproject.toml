@@ -1,0 +1,12 @@
+[project]
+name = "enterprise-drawio-diagrammer"
+version = "0.1.0"
+description = "Agent skill and Python helper for enterprise diagrams.net draw.io diagrams."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
