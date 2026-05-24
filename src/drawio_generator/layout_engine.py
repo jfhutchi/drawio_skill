@@ -32,6 +32,42 @@ ENTERPRISE_GROUP_ORDER = [
     "boundary-report-consumers",
 ]
 
+AWS_GROUP_ORDER = [
+    "boundary-aws-external",
+    "boundary-aws-account",
+    "boundary-aws-edge",
+    "boundary-aws-compute",
+    "boundary-aws-data",
+    "boundary-aws-analytics",
+    "boundary-aws-consumers",
+]
+
+AZURE_GROUP_ORDER = [
+    "boundary-azure-external",
+    "boundary-azure-global",
+    "boundary-azure-region-primary",
+    "boundary-azure-region-secondary",
+    "boundary-azure-data",
+    "boundary-azure-identity",
+    "boundary-azure-operations",
+]
+
+DATA_PLATFORM_GROUP_ORDER = [
+    "boundary-data-sources",
+    "boundary-data-ingest",
+    "boundary-data-process",
+    "boundary-data-store",
+    "boundary-data-serve",
+    "boundary-data-governance",
+]
+
+PATTERN_GROUP_ORDER = {
+    "aws-reference": AWS_GROUP_ORDER,
+    "azure-reference": AZURE_GROUP_ORDER,
+    "data-platform-pipeline": DATA_PLATFORM_GROUP_ORDER,
+    "enterprise-reference": ENTERPRISE_GROUP_ORDER,
+}
+
 
 def infer_layer(node: Node) -> str:
     node_type = (node.node_type or "").lower()
@@ -119,12 +155,13 @@ def _layout_horizontal(diagram: Diagram) -> None:
 
 def _layout_enterprise_horizontal(diagram: Diagram) -> None:
     grouped = _group_enterprise_nodes(diagram.nodes)
+    pattern_id = str(diagram.metadata.get("visual_pattern_id") or "") or None
     x = 80
     top_y = 165
     column_gap = 70
     node_gap = 36
 
-    for group_id in _ordered_group_ids(grouped):
+    for group_id in _ordered_group_ids(grouped, pattern_id):
         nodes = grouped[group_id]
         y = top_y
         column_width = max(node.width for node in nodes)
@@ -143,9 +180,19 @@ def _group_enterprise_nodes(nodes: list[Node]) -> dict[str, list[Node]]:
     return grouped
 
 
-def _ordered_group_ids(grouped: dict[str, list[Node]]) -> list[str]:
-    known = [group_id for group_id in ENTERPRISE_GROUP_ORDER if group_id in grouped]
-    unknown = sorted(group_id for group_id in grouped if group_id not in ENTERPRISE_GROUP_ORDER)
+def _ordered_group_ids(grouped: dict[str, list[Node]], pattern_id: str | None = None) -> list[str]:
+    orderings = []
+    if pattern_id and pattern_id in PATTERN_GROUP_ORDER:
+        orderings.append(PATTERN_GROUP_ORDER[pattern_id])
+    orderings.append(ENTERPRISE_GROUP_ORDER)
+    seen: set[str] = set()
+    known: list[str] = []
+    for ordering in orderings:
+        for group_id in ordering:
+            if group_id in grouped and group_id not in seen:
+                known.append(group_id)
+                seen.add(group_id)
+    unknown = sorted(group_id for group_id in grouped if group_id not in seen)
     return [*known, *unknown]
 
 

@@ -24,14 +24,16 @@ Follow this sequence for every diagram request:
 7. Map icons and stencils, using safe fallbacks when a precise icon is unavailable.
 8. Build an intermediate diagram model.
 9. Build a page plan that separates the executive overview from implementation detail, security, data/evidence flow, and operations follow-up.
-10. Select a visual pattern and write `visual-guide.md`.
-11. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
-12. Improve the model based on review findings.
-13. Generate uncompressed draw.io XML.
-14. Validate XML and model references.
-15. Check visual quality and output files.
-16. Produce final files and a concise explanation.
-17. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+10. Generate real draw.io pages from the page plan: Page 1 executive view, later pages for detail/security/data/operations.
+11. Select a visual pattern and write `visual-guide.md`.
+12. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
+13. Improve the model based on review findings.
+14. Generate uncompressed draw.io XML.
+15. Validate XML and model references.
+16. Run static visual QA and renderer availability detection; write `render-qa.md`.
+17. Check visual quality and output files.
+18. Produce final files and a concise explanation.
+19. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
 
 Do not generate raw draw.io XML directly from unstructured prose. Always create or reason through the intermediate model first.
 
@@ -100,7 +102,7 @@ Create multiple pages when one page would be unreadable. Recommended pages are E
 
 ## Page Planning
 
-Before generating the final draw.io XML, create a page plan and write it to `page-plan.md`. The plan should identify what belongs on:
+Before generating the final draw.io XML, create a page plan and write it to `page-plan.md`. The helper uses this plan to create real pages inside `diagram.drawio`:
 
 - Executive Overview: the primary flow, ownership zones, trust boundaries, critical outputs, and optional handoffs.
 - Implementation Detail: role stacks, job templates, inventories, variables, controller workspace details, and implementation mechanics.
@@ -195,7 +197,7 @@ Support at least these categories:
 - Data/messaging: PostgreSQL, SQL Server, MySQL, Oracle, Redis, Kafka, RabbitMQ, queues, event bus, object storage, file share, warehouse, data lake, backup, replication, ETL/ELT.
 - Observability/operations: Prometheus, Grafana, OpenTelemetry, Jaeger, Elastic, Splunk, log analytics, metrics, traces, alerts, incident management, runbooks, SLO/SLA, health checks, synthetic monitoring.
 
-If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable.
+If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. The helper records vendor-aware fallback metadata for common Azure and AWS service names, but those are diagrams.net built-in fallback shapes by default. Do not call them official Microsoft/Azure/AWS icons unless a licensed local official icon pack was actually used and documented.
 
 Use icon-like visual cues for common enterprise review nodes: repository/folder for source control, controller/process for Tower/AWX, server for Linux/Windows targets, cylinder for databases, queue for RabbitMQ/Kafka, note/document for Excel workbooks and reports, vault/lock for secret stores, cloud/object for SFS or object storage, and actor/user shapes for consumers.
 
@@ -286,6 +288,7 @@ The helper writes:
 - `diagram-summary.md`
 - `page-plan.md`
 - `visual-guide.md`
+- `render-qa.md`
 - `assumptions.md`
 - `adversarial-review.md`
 - `quality-checklist.md`
@@ -331,7 +334,7 @@ Return:
 2. Output file paths.
 3. Page-plan summary.
 4. Visual-guide summary.
-5. How validation was performed.
+5. How validation and visual QA were performed.
 6. Assumptions and unknowns.
 7. Adversarial review summary.
 8. Known limitations.
