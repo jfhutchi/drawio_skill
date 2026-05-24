@@ -108,39 +108,40 @@ def validate_drawio_xml(xml_text: str) -> list[ValidationIssue]:
         issues.append(ValidationIssue("error", "Missing diagram element"))
         return issues
 
-    graph_models = root.findall(".//mxGraphModel")
-    if not graph_models:
-        issues.append(ValidationIssue("error", "Missing mxGraphModel"))
-        return issues
-
-    cells = root.findall(".//mxCell")
-    cell_ids = [cell.attrib.get("id", "") for cell in cells]
-    if "0" not in cell_ids:
-        issues.append(ValidationIssue("error", 'Missing root cell id="0"'))
-    if "1" not in cell_ids:
-        issues.append(ValidationIssue("error", 'Missing root cell id="1"'))
-
-    seen: set[str] = set()
-    for cell_id in cell_ids:
-        if not cell_id:
-            issues.append(ValidationIssue("error", "Cell has empty id"))
+    for diagram_index, diagram in enumerate(diagrams, start=1):
+        graph_model = diagram.find("mxGraphModel")
+        if graph_model is None:
+            issues.append(ValidationIssue("error", "Missing mxGraphModel", diagram.attrib.get("name")))
             continue
-        if cell_id in seen:
-            issues.append(ValidationIssue("error", f"Duplicate mxCell id: {cell_id}", cell_id))
-        seen.add(cell_id)
 
-    vertex_or_edge = [cell for cell in cells if cell.attrib.get("vertex") == "1" or cell.attrib.get("edge") == "1"]
-    for cell in vertex_or_edge:
-        if cell.find("mxGeometry") is None:
-            issues.append(ValidationIssue("error", "mxCell is missing mxGeometry", cell.attrib.get("id")))
+        cells = graph_model.findall(".//mxCell")
+        cell_ids = [cell.attrib.get("id", "") for cell in cells]
+        if "0" not in cell_ids:
+            issues.append(ValidationIssue("error", f'Diagram {diagram_index} missing root cell id="0"'))
+        if "1" not in cell_ids:
+            issues.append(ValidationIssue("error", f'Diagram {diagram_index} missing root cell id="1"'))
 
-    id_set = set(cell_ids)
-    for cell in root.findall(".//mxCell[@edge='1']"):
-        source = cell.attrib.get("source")
-        target = cell.attrib.get("target")
-        if source not in id_set:
-            issues.append(ValidationIssue("error", f"Edge references missing source: {source}", cell.attrib.get("id")))
-        if target not in id_set:
-            issues.append(ValidationIssue("error", f"Edge references missing target: {target}", cell.attrib.get("id")))
+        seen: set[str] = set()
+        for cell_id in cell_ids:
+            if not cell_id:
+                issues.append(ValidationIssue("error", f"Diagram {diagram_index} cell has empty id"))
+                continue
+            if cell_id in seen:
+                issues.append(ValidationIssue("error", f"Duplicate mxCell id on diagram {diagram_index}: {cell_id}", cell_id))
+            seen.add(cell_id)
+
+        vertex_or_edge = [cell for cell in cells if cell.attrib.get("vertex") == "1" or cell.attrib.get("edge") == "1"]
+        for cell in vertex_or_edge:
+            if cell.find("mxGeometry") is None:
+                issues.append(ValidationIssue("error", f"Diagram {diagram_index} mxCell is missing mxGeometry", cell.attrib.get("id")))
+
+        id_set = set(cell_ids)
+        for cell in graph_model.findall(".//mxCell[@edge='1']"):
+            source = cell.attrib.get("source")
+            target = cell.attrib.get("target")
+            if source not in id_set:
+                issues.append(ValidationIssue("error", f"Diagram {diagram_index} edge references missing source: {source}", cell.attrib.get("id")))
+            if target not in id_set:
+                issues.append(ValidationIssue("error", f"Diagram {diagram_index} edge references missing target: {target}", cell.attrib.get("id")))
 
     return issues

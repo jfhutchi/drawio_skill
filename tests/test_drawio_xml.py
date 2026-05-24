@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from drawio_generator.diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from drawio_generator.drawio_xml import generate_drawio_xml
+from drawio_generator.drawio_xml import generate_drawio_xml, generate_multipage_drawio_xml
+from drawio_generator.page_planner import build_page_plan
 from drawio_generator.validators import validate_drawio_xml
 
 
@@ -126,6 +127,148 @@ class DrawioXmlTests(unittest.TestCase):
         self.assertIn("fillColor=#f8fbff", cells["source-zone"].attrib["style"])
         self.assertIn("strokeColor=#dc2626", cells["trust-boundary"].attrib["style"])
         self.assertIn("dashed=1", cells["trust-boundary"].attrib["style"])
+
+    def test_multipage_xml_renumbers_edges_per_page_starting_at_one(self):
+        diagram = Diagram(
+            title="Renumber",
+            diagram_type="enterprise",
+            direction="left-to-right",
+            boundaries=[
+                Boundary(id="boundary-source-control", label="Source Control Zone", boundary_type="logical"),
+                Boundary(id="boundary-automation-control", label="Automation Control Zone", boundary_type="logical"),
+                Boundary(id="boundary-customer-infrastructure", label="Customer Infrastructure Trust Boundary", boundary_type="trust"),
+            ],
+            nodes=[
+                Node(id="repo", label="GitHub Repository", node_type="repository", group="boundary-source-control"),
+                Node(id="tower", label="Ansible Tower / AWX", node_type="ansible", group="boundary-automation-control"),
+                Node(id="vault", label="Delinea Secret Server", node_type="secret", group="boundary-automation-control"),
+                Node(id="targets", label="Customer Targets", node_type="server", group="boundary-customer-infrastructure"),
+            ],
+            edges=[
+                Edge(id="sync", source="repo", target="tower", label="Project sync", metadata={"sequence": 1, "flow_type": "control"}),
+                Edge(id="collect", source="tower", target="targets", label="Collect health evidence", metadata={"sequence": 2, "flow_type": "target_collection"}),
+                Edge(id="secrets", source="tower", target="vault", label="Retrieve runtime secrets", metadata={"sequence": 3, "flow_type": "security_sensitive"}),
+            ],
+        )
+
+        xml_text = generate_multipage_drawio_xml(diagram, build_page_plan(diagram))
+        root = ET.fromstring(xml_text)
+        security_page = next(page for page in root.findall("diagram") if page.attrib["name"] == "Security and Trust Boundaries")
+        security_edge_values = sorted(int(cell.attrib["value"]) for cell in security_page.findall(".//mxCell[@edge='1']") if cell.attrib.get("value", "").isdigit())
+
+        self.assertIn(1, security_edge_values)
+        self.assertEqual(list(range(1, len(security_edge_values) + 1)), security_edge_values)
+
+    def test_multipage_xml_keeps_bridge_security_nodes_on_executive_page(self):
+        diagram = Diagram(
+            title="Ingress Chain",
+            diagram_type="cloud",
+            direction="left-to-right",
+            boundaries=[
+                Boundary(id="boundary-azure-global", label="Global", boundary_type="cloud"),
+                Boundary(id="boundary-azure-region-primary", label="Primary Region", boundary_type="cloud"),
+                Boundary(id="boundary-azure-identity", label="Identity", boundary_type="trust"),
+            ],
+            nodes=[
+                Node(id="afd", label="Azure Front Door", node_type="cdn", group="boundary-azure-global"),
+                Node(id="waf", label="Application Gateway WAF", node_type="waf", group="boundary-azure-identity"),
+                Node(id="aks", label="AKS", node_type="kubernetes", group="boundary-azure-region-primary"),
+            ],
+            edges=[
+                Edge(id="ingress", source="afd", target="waf", label="HTTPS ingress", metadata={"sequence": 1, "flow_type": "control"}),
+                Edge(id="route", source="waf", target="aks", label="Route to AKS", metadata={"sequence": 2, "flow_type": "control"}),
+            ],
+        )
+
+        xml_text = generate_multipage_drawio_xml(diagram, build_page_plan(diagram))
+        root = ET.fromstring(xml_text)
+        executive = next(page for page in root.findall("diagram") if page.attrib["name"] == "Executive Overview")
+        node_labels = {cell.attrib.get("value") for cell in executive.findall(".//mxCell[@vertex='1']")}
+
+        self.assertIn("Azure Front Door", node_labels)
+        self.assertIn("Application Gateway WAF", node_labels)
+        self.assertIn("AKS", node_labels)
+        executive_edge_count = len(executive.findall(".//mxCell[@edge='1']"))
+        self.assertEqual(2, executive_edge_count)
+
+    def test_multipage_xml_skips_pages_with_no_content_after_executive(self):
+        diagram = Diagram(
+            title="Minimal",
+            diagram_type="enterprise",
+            direction="left-to-right",
+            boundaries=[
+                Boundary(id="boundary-source-control", label="Source Control Zone", boundary_type="logical"),
+                Boundary(id="boundary-automation-control", label="Automation Control Zone", boundary_type="logical"),
+            ],
+            nodes=[
+                Node(id="repo", label="GitHub Repository", node_type="repository", group="boundary-source-control"),
+                Node(id="tower", label="Ansible Tower / AWX", node_type="ansible", group="boundary-automation-control"),
+            ],
+            edges=[
+                Edge(id="sync", source="repo", target="tower", label="Project sync", metadata={"sequence": 1, "flow_type": "control"}),
+            ],
+        )
+
+        xml_text = generate_multipage_drawio_xml(diagram, build_page_plan(diagram))
+        root = ET.fromstring(xml_text)
+        page_names = [page.attrib["name"] for page in root.findall("diagram")]
+
+        self.assertEqual("Executive Overview", page_names[0])
+        self.assertNotIn("Implementation Detail", page_names)
+        self.assertNotIn("Security and Trust Boundaries", page_names)
+        self.assertNotIn("Data and Evidence Flow", page_names)
+        self.assertEqual([], validate_drawio_xml(xml_text))
+
+    def test_multipage_xml_separates_executive_detail_security_and_data_pages(self):
+        diagram = Diagram(
+            title="SHC Automation",
+            diagram_type="enterprise",
+            direction="left-to-right",
+            boundaries=[
+                Boundary(id="boundary-source-control", label="Source Control Zone", boundary_type="logical"),
+                Boundary(id="boundary-automation-control", label="Automation Control Zone", boundary_type="logical"),
+                Boundary(id="boundary-customer-infrastructure", label="Customer Infrastructure Trust Boundary", boundary_type="trust"),
+                Boundary(id="boundary-reporting-evidence", label="Reporting / Evidence Zone", boundary_type="logical"),
+            ],
+            nodes=[
+                Node(id="repo", label="GitHub Repository", node_type="repository", group="boundary-source-control"),
+                Node(id="tower", label="Ansible Tower / AWX", node_type="ansible", group="boundary-automation-control"),
+                Node(id="runtime-inputs", label="Tower Runtime Inputs", node_type="process", group="boundary-automation-control", metadata={"detail_level": "detail"}),
+                Node(id="roles", label="SHC Role Execution", node_type="process", group="boundary-automation-control", metadata={"detail_level": "deep"}),
+                Node(id="targets", label="Customer Targets", node_type="server", group="boundary-customer-infrastructure"),
+                Node(id="reports", label="Customer Excel Workbooks", node_type="workbook", group="boundary-reporting-evidence"),
+                Node(id="vault", label="Delinea Secret Server", node_type="secret", group="boundary-automation-control"),
+            ],
+            edges=[
+                Edge(id="sync", source="repo", target="tower", label="Project sync", metadata={"sequence": 1, "flow_type": "control"}),
+                Edge(id="collect", source="tower", target="targets", label="Collect health evidence", metadata={"sequence": 2, "flow_type": "target_collection"}),
+                Edge(id="workbook", source="targets", target="reports", label="Generate Excel workbook", metadata={"sequence": 3, "flow_type": "report_evidence"}),
+                Edge(id="runtime", source="runtime-inputs", target="roles", label="Role variables", metadata={"sequence": 4, "flow_type": "control"}),
+                Edge(id="secrets", source="tower", target="vault", label="Retrieve runtime secrets", metadata={"sequence": 5, "flow_type": "security_sensitive"}),
+            ],
+        )
+
+        xml_text = generate_multipage_drawio_xml(diagram, build_page_plan(diagram))
+        root = ET.fromstring(xml_text)
+        pages = {page.attrib["name"]: page for page in root.findall("diagram")}
+
+        self.assertIn("Executive Overview", pages)
+        self.assertIn("Implementation Detail", pages)
+        self.assertIn("Security and Trust Boundaries", pages)
+        self.assertIn("Data and Evidence Flow", pages)
+        executive_ids = {cell.attrib.get("id") for cell in pages["Executive Overview"].findall(".//mxCell")}
+        detail_ids = {cell.attrib.get("id") for cell in pages["Implementation Detail"].findall(".//mxCell")}
+        security_ids = {cell.attrib.get("id") for cell in pages["Security and Trust Boundaries"].findall(".//mxCell")}
+        data_ids = {cell.attrib.get("id") for cell in pages["Data and Evidence Flow"].findall(".//mxCell")}
+
+        self.assertIn("p1_repo", executive_ids)
+        self.assertNotIn("p1_runtime-inputs", executive_ids)
+        self.assertIn("p2_runtime-inputs", detail_ids)
+        self.assertIn("p2_roles", detail_ids)
+        self.assertIn("p3_vault", security_ids)
+        self.assertIn("p3_secrets", security_ids)
+        self.assertIn("p4_reports", data_ids)
+        self.assertEqual([], validate_drawio_xml(xml_text))
 
 
 if __name__ == "__main__":

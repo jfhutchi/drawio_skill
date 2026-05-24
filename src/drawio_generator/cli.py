@@ -9,12 +9,13 @@ from pathlib import Path
 
 from .adversarial_review import improve_diagram, render_adversarial_review, review_diagram
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .drawio_xml import generate_drawio_xml
+from .drawio_xml import generate_multipage_drawio_xml
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
 from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
 from .visual_patterns import recommend_visual_pattern, render_visual_guide
+from .visual_qa import analyze_drawio_xml, detect_renderer, render_visual_qa
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,8 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     initial_findings = review_diagram(diagram)
     improved = improve_diagram(diagram, initial_findings)
     final_findings = review_diagram(improved)
-    page_plan = build_page_plan(improved)
     visual_pattern = recommend_visual_pattern(improved, request)
+    apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
+    page_plan = build_page_plan(improved)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
     if model_issues:
@@ -41,8 +43,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model validation error: {issue.message}", file=sys.stderr)
         return 2
 
-    drawio_xml = generate_drawio_xml(improved)
+    drawio_xml = generate_multipage_drawio_xml(improved, page_plan)
     xml_issues = [issue for issue in validate_drawio_xml(drawio_xml) if issue.severity == "error"]
+    visual_qa_issues = analyze_drawio_xml(drawio_xml)
+    renderer = detect_renderer()
     if args.validate and xml_issues:
         for issue in xml_issues:
             print(f"draw.io validation error: {issue.message}", file=sys.stderr)
@@ -52,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     (output_dir / "diagram-summary.md").write_text(render_summary(improved), encoding="utf-8")
     (output_dir / "page-plan.md").write_text(render_page_plan(page_plan), encoding="utf-8")
     (output_dir / "visual-guide.md").write_text(render_visual_guide(visual_pattern), encoding="utf-8")
+    (output_dir / "render-qa.md").write_text(render_visual_qa(visual_qa_issues, renderer), encoding="utf-8")
     (output_dir / "assumptions.md").write_text(render_assumptions(improved), encoding="utf-8")
     (output_dir / "adversarial-review.md").write_text(render_adversarial_review(initial_findings, final_findings), encoding="utf-8")
     (output_dir / "quality-checklist.md").write_text(
@@ -99,10 +104,10 @@ def detect_diagram_type(request: str) -> str:
         return "kubernetes"
     if any(term in lowered for term in ["security", "secret", "vault"]):
         return "security"
+    if any(term in lowered for term in ["aws", "azure", "google cloud", "gcp", "amazon ", "lambda", "vpc", "vnet", "region"]):
+        return "cloud"
     if any(term in lowered for term in ["code workflow", "repository", "module", "class", "function"]):
         return "code"
-    if any(term in lowered for term in ["aws", "azure", "google cloud", "vpc", "vnet", "region"]):
-        return "cloud"
     return "enterprise"
 
 
@@ -189,6 +194,126 @@ def _build_boundaries(diagram_type: str, nodes: list[Node], request: str) -> lis
     if diagram_type in {"enterprise", "cloud", "network"}:
         return [Boundary(id="boundary-enterprise", label="Enterprise Architecture Boundary", boundary_type="logical")]
     return []
+
+
+PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
+    "aws-reference": [
+        ("boundary-aws-external", "External / On-Premises", "logical"),
+        ("boundary-aws-account", "AWS Account / Region", "cloud"),
+        ("boundary-aws-edge", "Edge / Ingress", "logical"),
+        ("boundary-aws-compute", "Compute / Microservices", "logical"),
+        ("boundary-aws-data", "Data Lake / Stores", "logical"),
+        ("boundary-aws-analytics", "Analytics / AI-ML", "logical"),
+        ("boundary-aws-consumers", "Consumers / Notifications", "logical"),
+    ],
+    "azure-reference": [
+        ("boundary-azure-external", "External / Internet", "logical"),
+        ("boundary-azure-global", "Azure Global Services", "cloud"),
+        ("boundary-azure-region-primary", "Primary Region", "cloud"),
+        ("boundary-azure-region-secondary", "Secondary Region", "cloud"),
+        ("boundary-azure-data", "Data Tier", "logical"),
+        ("boundary-azure-identity", "Identity / Security", "trust"),
+        ("boundary-azure-operations", "Operations / Monitoring", "logical"),
+    ],
+    "data-platform-pipeline": [
+        ("boundary-data-sources", "Sources", "logical"),
+        ("boundary-data-ingest", "Ingest", "logical"),
+        ("boundary-data-process", "Process", "logical"),
+        ("boundary-data-store", "Store", "logical"),
+        ("boundary-data-serve", "Serve", "logical"),
+        ("boundary-data-governance", "Discover and Govern", "trust"),
+    ],
+}
+
+
+def apply_visual_pattern_to_diagram(diagram: Diagram, pattern_id: str) -> Diagram:
+    """Re-group nodes and rebuild boundaries to match the recommended visual pattern.
+
+    Enterprise-reference patterns leave the model unchanged. AWS, Azure, and
+    data-platform patterns swap in pattern-specific boundary IDs so the
+    layout engine can order columns appropriately. The pattern_id is recorded
+    on diagram.metadata so the layout engine picks the right column order.
+    """
+
+    diagram.metadata = {**diagram.metadata, "visual_pattern_id": pattern_id}
+    classifier = _pattern_classifier(pattern_id)
+    if classifier is None:
+        return diagram
+    specs = PATTERN_BOUNDARY_SPECS[pattern_id]
+    matched: set[str] = set()
+    for node in diagram.nodes:
+        group_id = classifier(node)
+        node.group = group_id
+        matched.add(group_id)
+    diagram.boundaries = [
+        Boundary(id=group_id, label=label, boundary_type=boundary_type)
+        for group_id, label, boundary_type in specs
+        if group_id in matched
+    ]
+    return diagram
+
+
+def _pattern_classifier(pattern_id: str):
+    if pattern_id == "aws-reference":
+        return _aws_group_for_node
+    if pattern_id == "azure-reference":
+        return _azure_group_for_node
+    if pattern_id == "data-platform-pipeline":
+        return _data_platform_group_for_node
+    return None
+
+
+def _aws_group_for_node(node: Node) -> str:
+    text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["consumer", "reviewer", "engineer", "auditor", "sns", "notification", "email"]):
+        return "boundary-aws-consumers"
+    if any(term in text for term in ["quicksight", "athena", "redshift", "kinesis analytics", "sagemaker", "comprehend", "rekognition", "analytics", "ai/ml"]):
+        return "boundary-aws-analytics"
+    if any(term in text for term in ["s3", "dynamodb", "rds", "object storage", "data lake", "warehouse", "database"]):
+        return "boundary-aws-data"
+    if any(term in text for term in ["lambda", "ecs", "eks", "fargate", "ec2", "kubernetes", "container", "microservice", "process"]):
+        return "boundary-aws-compute"
+    if any(term in text for term in ["cloudfront", "api gateway", "waf", "alb", "elb", "load balancer", "gateway", "cdn"]):
+        return "boundary-aws-edge"
+    if any(term in text for term in ["user", "external", "on-prem", "internet", "browser", "mobile", "device"]):
+        return "boundary-aws-external"
+    return "boundary-aws-account"
+
+
+def _azure_group_for_node(node: Node) -> str:
+    text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["monitor", "log analytics", "grafana", "prometheus", "azure monitor"]):
+        return "boundary-azure-operations"
+    if any(term in text for term in ["key vault", "vault", "secret", "active directory", "entra", "rbac", "identity", "mfa", "pim", "managed identity"]):
+        return "boundary-azure-identity"
+    if any(term in text for term in ["sql", "postgres", "cosmos", "database", "storage account", "data lake", "warehouse"]):
+        return "boundary-azure-data"
+    if "secondary" in text:
+        return "boundary-azure-region-secondary"
+    if any(term in text for term in ["aks", "kubernetes", "app service", "function", "vm", "container", "primary"]):
+        return "boundary-azure-region-primary"
+    if any(term in text for term in ["front door", "traffic manager", "cdn", "application gateway", "azure ad"]):
+        return "boundary-azure-global"
+    if any(term in text for term in ["user", "external", "on-prem", "internet", "browser", "mobile"]):
+        return "boundary-azure-external"
+    return "boundary-azure-region-primary"
+
+
+def _data_platform_group_for_node(node: Node) -> str:
+    text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["governance", "purview", "data catalog", "lineage", "policy", "compliance"]):
+        return "boundary-data-governance"
+    if any(term in text for term in ["power bi", "dashboard", "report", "tableau", "looker", "consumer", "analyst", "serve"]):
+        return "boundary-data-serve"
+    if any(term in text for term in ["delta lake", "lake", "warehouse", "synapse", "snowflake", "redshift", "bigquery", "bronze", "silver", "gold", "store"]):
+        return "boundary-data-store"
+    if any(term in text for term in ["databricks", "spark", "notebook", "dataflow", "transform", "etl", "elt", "process", "fabric"]):
+        return "boundary-data-process"
+    if any(term in text for term in ["event hub", "kafka", "kinesis", "queue", "stream", "ingest", "data factory", "adf"]):
+        return "boundary-data-ingest"
+    if any(term in text for term in ["sensor", "iot", "device", "log", "file", "source", "api", "crm", "erp", "saas"]):
+        return "boundary-data-sources"
+    return "boundary-data-ingest"
 
 
 def _build_enterprise_boundaries(nodes: list[Node]) -> list[Boundary]:

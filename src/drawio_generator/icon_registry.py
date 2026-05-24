@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Iterable
+
+from .icon_packs import IconPack, discover_icon_packs
 
 
 BASE_STYLE = (
@@ -20,6 +24,9 @@ class IconStyle:
     category: str
     drawio_style: str
     fallback_label: str
+    vendor: str | None = None
+    official: bool = False
+    license_notice: str = "diagrams.net built-in fallback shape; no official vendor icon embedded"
 
 
 STYLE_REGISTRY: dict[str, IconStyle] = {
@@ -65,10 +72,34 @@ STYLE_REGISTRY: dict[str, IconStyle] = {
 ALIASES: dict[str, str] = {
     "aks": "kubernetes",
     "azure kubernetes service": "kubernetes",
-    "postgresql": "database",
-    "azure database for postgresql": "database",
-    "key vault": "secret",
+    "azure app service": "backend",
+    "azure functions": "process",
+    "azure front door": "cdn",
+    "azure application gateway": "gateway",
+    "application gateway": "gateway",
+    "azure traffic manager": "cdn",
     "azure key vault": "secret",
+    "key vault": "secret",
+    "azure database for postgresql": "database",
+    "azure sql database": "database",
+    "azure sql": "database",
+    "azure monitor": "monitoring",
+    "log analytics": "logging",
+    "aws lambda": "process",
+    "amazon lambda": "process",
+    "amazon s3": "object_storage",
+    "aws s3": "object_storage",
+    "amazon dynamodb": "database",
+    "aws dynamodb": "database",
+    "amazon rds": "database",
+    "aws rds": "database",
+    "amazon cloudfront": "cdn",
+    "aws cloudfront": "cdn",
+    "aws waf": "waf",
+    "aws iam": "identity",
+    "amazon api gateway": "gateway",
+    "aws api gateway": "gateway",
+    "postgresql": "database",
     "delinea secret server": "secret",
     "github repository": "repository",
     "github actions": "process",
@@ -90,17 +121,96 @@ ALIASES: dict[str, str] = {
     "report consumers": "consumer",
 }
 
+VENDOR_TERMS: dict[str, tuple[str, ...]] = {
+    "azure": ("azure", "aks", "key vault", "front door", "traffic manager", "application gateway"),
+    "aws": ("aws", "amazon", "cloudfront", "dynamodb", "lambda", "s3"),
+    "gcp": ("google cloud", "gcp"),
+}
+
+
+def _vendor_for(label: str) -> str | None:
+    lowered = label.lower()
+    for vendor, terms in VENDOR_TERMS.items():
+        if any(term in lowered for term in terms):
+            return vendor
+    return None
+
+
+def _with_vendor(style: IconStyle, vendor: str | None) -> IconStyle:
+    if vendor is None:
+        return style
+    return replace(
+        style,
+        vendor=vendor,
+        official=False,
+        license_notice=f"{vendor.upper()} diagrams.net built-in fallback shape; no official vendor icon embedded",
+    )
+
+
+_PACK_CACHE: dict[str, IconPack] | None = None
+
+
+def _packs() -> dict[str, IconPack]:
+    global _PACK_CACHE
+    if _PACK_CACHE is None:
+        _PACK_CACHE = discover_icon_packs()
+    return _PACK_CACHE
+
+
+def refresh_icon_packs(extra_roots: Iterable[Path] | None = None) -> dict[str, IconPack]:
+    """Force a rediscovery of local vendor icon packs. Returns the active packs."""
+
+    global _PACK_CACHE
+    _PACK_CACHE = discover_icon_packs(extra_roots)
+    return _PACK_CACHE
+
+
+def _official_for(label: str, vendor: str | None) -> IconStyle | None:
+    if vendor is None:
+        return None
+    pack = _packs().get(vendor)
+    if pack is None:
+        return None
+    style = pack.lookup(label)
+    if not style:
+        return None
+    return IconStyle(
+        category=f"{vendor}-official",
+        drawio_style=style,
+        fallback_label=label.strip().title() or vendor.title(),
+        vendor=vendor,
+        official=True,
+        license_notice=pack.license_notice,
+    )
+
 
 def get_icon_style(node_type: str | None, icon: str | None = None) -> IconStyle:
-    """Return the closest available draw.io style for a node."""
+    """Return the closest available draw.io style for a node.
 
+    A locally licensed vendor icon pack is used when present. Otherwise the
+    vendor-aware aliases map to safe diagrams.net built-in fallback shapes and
+    the returned metadata records the vendor and explicitly says the style is
+    not an official vendor icon.
+    """
+
+    fallback_vendor: str | None = None
     for candidate in (icon, node_type):
         if not candidate:
             continue
-        key = candidate.strip().lower()
-        key = ALIASES.get(key, key)
+        raw_key = candidate.strip().lower()
+        vendor = _vendor_for(raw_key)
+        fallback_vendor = fallback_vendor or vendor
+        official = _official_for(raw_key, vendor)
+        if official is not None:
+            return official
+        key = ALIASES.get(raw_key, raw_key)
+        official_alias = _official_for(key, vendor)
+        if official_alias is not None:
+            return official_alias
         if key in STYLE_REGISTRY:
-            return STYLE_REGISTRY[key]
+            return _with_vendor(STYLE_REGISTRY[key], vendor)
+    if fallback_vendor:
+        return _with_vendor(IconStyle("fallback", DEFAULT_STYLE, "Component"), fallback_vendor)
     return IconStyle("fallback", DEFAULT_STYLE, "Component")
 
 

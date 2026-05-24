@@ -20,6 +20,29 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual("enterprise", diagram_type)
 
+    def test_aws_request_with_lambda_functions_is_classified_as_cloud_not_code(self):
+        diagram_type = detect_diagram_type(
+            "Create an AWS reference architecture diagram with internet users, "
+            "Amazon CloudFront, API Gateway, AWS Lambda functions, Amazon DynamoDB, "
+            "Amazon S3 data lake, Amazon Kinesis stream, and Amazon SNS notifications."
+        )
+
+        self.assertEqual("cloud", diagram_type)
+
+    def test_azure_request_with_function_app_is_classified_as_cloud_not_code(self):
+        diagram_type = detect_diagram_type(
+            "Show how Azure Functions, Azure SQL, and an Azure Storage Account talk to each other."
+        )
+
+        self.assertEqual("cloud", diagram_type)
+
+    def test_explicit_code_workflow_request_still_wins(self):
+        diagram_type = detect_diagram_type(
+            "Analyze this repository and create a code workflow diagram showing entry points and modules."
+        )
+
+        self.assertEqual("code", diagram_type)
+
     def test_title_builder_creates_polished_enterprise_titles(self):
         title = _title_from_request(
             "Create an enterprise architecture diagram for an Azure-hosted web application "
@@ -72,7 +95,10 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "quality-checklist.md").exists())
             self.assertTrue((output / "page-plan.md").exists())
             self.assertTrue((output / "visual-guide.md").exists())
-            ET.fromstring((output / "diagram.drawio").read_text(encoding="utf-8"))
+            self.assertTrue((output / "render-qa.md").exists())
+            xml_root = ET.fromstring((output / "diagram.drawio").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(len(xml_root.findall("diagram")), 4)
+            self.assertEqual("Executive Overview", xml_root.findall("diagram")[0].attrib["name"])
             self.assertIn("AKS", (output / "diagram-summary.md").read_text(encoding="utf-8"))
             page_plan = (output / "page-plan.md").read_text(encoding="utf-8")
             self.assertIn("Executive Overview", page_plan)

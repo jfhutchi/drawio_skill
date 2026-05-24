@@ -76,12 +76,13 @@ The helper writes:
 - `output/diagram-summary.md`
 - `output/page-plan.md`
 - `output/visual-guide.md`
+- `output/render-qa.md`
 - `output/assumptions.md`
 - `output/adversarial-review.md`
 - `output/quality-checklist.md`
 - `output/research-summary.md`
 
-Open `diagram.drawio` in diagrams.net. The XML is intentionally uncompressed so it can be inspected and repaired if needed.
+The helper writes real multi-page uncompressed `.drawio` files from `page-plan.md`: Page 1 is the executive architecture view, while later pages carry implementation detail, security/trust, data/evidence, and operations content. Open `diagram.drawio` in diagrams.net. The XML is intentionally uncompressed so it can be inspected and repaired if needed.
 
 ## Validate Existing Draw.io Files
 
@@ -131,11 +132,12 @@ The skill instructions are broader than the helper. When an AI agent has web sea
 - `layout_engine.py`: deterministic enterprise layout heuristics.
 - `page_planner.py`: recommends Page 1 versus detail, security, data/evidence, and operations follow-up content.
 - `visual_patterns.py`: recommends Azure, AWS, data-platform, presentation, or enterprise reference visual patterns.
-- `icon_registry.py`: built-in draw.io style mappings with safe fallbacks.
-- `drawio_xml.py`: XML generation from the intermediate model.
+- `visual_qa.py`: detects local renderer availability and runs static overlap/off-canvas/label/badge checks.
+- `icon_registry.py`: vendor-aware built-in draw.io style mappings with safe fallbacks that do not claim official vendor icons.
+- `drawio_xml.py`: single-page and multi-page XML generation from the intermediate model.
 - `validators.py`: model/XML validation and secret redaction.
 - `cli.py`: command-line workflow that writes the required output artifacts.
 
 ## Known Limits
 
-This is a portable, dependency-light implementation. It does not render PNG/SVG without external diagrams.net tooling, does not perform live web research by itself, and uses heuristics rather than full parsers for complex IaC/codebases. The skill instructs the agent to fill those gaps when richer tools are available.
+This is a portable, dependency-light implementation. It records whether a local draw.io/diagrams.net renderer is available and always runs static visual QA, but it does not export PNG/SVG/screenshots unless external renderer integration is added. It does not perform live web research by itself, and uses heuristics rather than full parsers for complex IaC/codebases. The skill instructs the agent to fill those gaps when richer tools are available.

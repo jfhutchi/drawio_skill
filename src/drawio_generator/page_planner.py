@@ -42,6 +42,10 @@ def build_page_plan(diagram: Diagram) -> PagePlan:
     data_node_set = set(data_nodes)
     operations_node_set = set(operations_nodes)
 
+    bridges = _executive_bridge_nodes(diagram, executive_node_set)
+    executive_node_set.update(bridges)
+    executive_nodes = [*executive_nodes, *[b for b in bridges if b not in executive_nodes]]
+
     pages = [
         PagePlanPage(
             title="Executive Overview",
@@ -52,7 +56,6 @@ def build_page_plan(diagram: Diagram) -> PagePlan:
                 for edge in diagram.edges
                 if edge.source in executive_node_set
                 and edge.target in executive_node_set
-                and _flow_type(edge) != "security_sensitive"
             ],
             notes=[
                 "Use short numbered flow labels and keep full descriptions in the legend.",
@@ -144,6 +147,31 @@ def render_page_plan(plan: PagePlan) -> str:
             ]
         )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _executive_bridge_nodes(diagram: Diagram, executive_node_set: set[str]) -> list[str]:
+    """Pull bridge nodes onto the executive page when they connect two executive nodes.
+
+    Without this, security/identity nodes get filtered to the security page and
+    can orphan an executive node (e.g., Azure Front Door -> WAF -> AKS becomes
+    AFD floating alone on Page 1 because WAF was yanked to Security).
+    """
+
+    incoming: dict[str, set[str]] = {}
+    outgoing: dict[str, set[str]] = {}
+    for edge in diagram.edges:
+        outgoing.setdefault(edge.source, set()).add(edge.target)
+        incoming.setdefault(edge.target, set()).add(edge.source)
+
+    bridges: list[str] = []
+    for node in diagram.nodes:
+        if node.id in executive_node_set:
+            continue
+        upstream = incoming.get(node.id, set()) & executive_node_set
+        downstream = outgoing.get(node.id, set()) & executive_node_set
+        if upstream and downstream:
+            bridges.append(node.id)
+    return bridges
 
 
 def _executive_nodes(nodes: list[Node]) -> list[str]:
