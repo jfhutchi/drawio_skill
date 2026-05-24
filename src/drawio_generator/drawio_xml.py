@@ -50,6 +50,7 @@ def generate_drawio_xml(diagram: Diagram) -> str:
         _add_legend(root, laid_out.legends, laid_out.edges)
     for edge in laid_out.edges:
         _add_edge(root, edge)
+    _add_flow_badges(root, laid_out)
 
     ET.indent(mxfile, space="  ")
     return ET.tostring(mxfile, encoding="unicode", short_empty_elements=True)
@@ -164,6 +165,44 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
     ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
 
 
+def _add_flow_badges(root: ET.Element, diagram: Diagram) -> None:
+    nodes = {node.id: node for node in diagram.nodes}
+    for edge in diagram.edges:
+        sequence = edge.metadata.get("sequence")
+        source = nodes.get(edge.source)
+        target = nodes.get(edge.target)
+        if sequence is None or source is None or target is None:
+            continue
+        _add_flow_badge(root, edge, source, target, str(sequence))
+
+
+def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, value: str) -> None:
+    size = 28
+    source_x = (source.x or 0) + source.width
+    source_y = (source.y or 0) + source.height // 2
+    target_x = target.x or 0
+    target_y = (target.y or 0) + target.height // 2
+    x = max(30, (source_x + target_x) // 2 - size // 2)
+    y = max(30, (source_y + target_y) // 2 - size // 2)
+    fill = _flow_color(edge)
+    cell = ET.SubElement(
+        root,
+        "mxCell",
+        {
+            "id": f"__badge_{edge.id}",
+            "value": value,
+            "style": (
+                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;"
+                f"fillColor={fill};strokeColor=#ffffff;fontColor=#ffffff;fontStyle=1;fontSize=13;"
+                "align=center;verticalAlign=middle;spacing=0;"
+            ),
+            "vertex": "1",
+            "parent": "1",
+        },
+    )
+    ET.SubElement(cell, "mxGeometry", {"x": str(x), "y": str(y), "width": str(size), "height": str(size), "as": "geometry"})
+
+
 def _add_legend(root: ET.Element, legends: list[LegendItem], edges: list[Edge]) -> None:
     rows = ["Legend", *[f"{item.label}: {item.meaning}" for item in legends], *_flow_legend_rows(edges)]
     value = "\n".join(rows)
@@ -194,19 +233,24 @@ def _boundary_style(boundary: Boundary) -> str:
 
 def _edge_style(edge: Edge) -> str:
     flow_type = _flow_type(edge)
-    stroke = {
-        "control": "#4f46e5",
-        "target_collection": "#2f9e44",
-        "report_evidence": "#d97706",
-        "optional_storage": "#6c757d",
-        "security_sensitive": "#dc2626",
-    }.get(flow_type, "#495057")
+    stroke = _flow_color(edge)
     dashed = "dashed=1;dashPattern=8 4;" if flow_type in {"optional_storage", "security_sensitive"} else ""
     return (
         "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;"
         f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;strokeWidth=2;"
         f"{dashed}"
     )
+
+
+def _flow_color(edge: Edge) -> str:
+    flow_type = _flow_type(edge)
+    return {
+        "control": "#4f46e5",
+        "target_collection": "#2f9e44",
+        "report_evidence": "#d97706",
+        "optional_storage": "#6c757d",
+        "security_sensitive": "#dc2626",
+    }.get(flow_type, "#495057")
 
 
 def _edge_value(edge: Edge) -> str:

@@ -9,7 +9,7 @@ description: Use when a user asks for professional draw.io, diagrams.net, archit
 
 Create enterprise-quality draw.io / diagrams.net diagrams from natural-language requests and supplied files. Always produce valid `.drawio` XML and supporting review artifacts. The diagram should be useful to architects, SREs, security teams, developers, and executives, not just a collection of boxes.
 
-Use the helper package in `src/drawio_generator` when executable scripts are available. The helper creates a structured intermediate model, plans executive/detail pages, generates uncompressed draw.io XML, validates it, redacts secrets, writes review files, and gives the agent a solid first draft to improve.
+Use the helper package in `src/drawio_generator` when executable scripts are available. The helper creates a structured intermediate model, plans executive/detail pages, selects a reference visual pattern, generates uncompressed draw.io XML, validates it, redacts secrets, writes review files, and gives the agent a solid first draft to improve.
 
 ## Required Workflow
 
@@ -24,13 +24,14 @@ Follow this sequence for every diagram request:
 7. Map icons and stencils, using safe fallbacks when a precise icon is unavailable.
 8. Build an intermediate diagram model.
 9. Build a page plan that separates the executive overview from implementation detail, security, data/evidence flow, and operations follow-up.
-10. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
-11. Improve the model based on review findings.
-12. Generate uncompressed draw.io XML.
-13. Validate XML and model references.
-14. Check visual quality and output files.
-15. Produce final files and a concise explanation.
-16. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+10. Select a visual pattern and write `visual-guide.md`.
+11. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
+12. Improve the model based on review findings.
+13. Generate uncompressed draw.io XML.
+14. Validate XML and model references.
+15. Check visual quality and output files.
+16. Produce final files and a concise explanation.
+17. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
 
 Do not generate raw draw.io XML directly from unstructured prose. Always create or reason through the intermediate model first.
 
@@ -108,6 +109,18 @@ Before generating the final draw.io XML, create a page plan and write it to `pag
 - Operations and Follow-Up: monitoring, logs, health checks, runbooks, assumptions, unknowns, limits, and follow-up diagrams.
 
 Use `page-plan.md` as a quality gate: if Page 1 includes content that belongs on a detail page, simplify Page 1 before final delivery.
+
+## Visual Pattern Selection
+
+Before final output, select a reference visual pattern and write it to `visual-guide.md`. Use it to steer layout, palette, callouts, icon choices, and routing:
+
+- Azure Reference Architecture: primary/secondary regions, tier columns, dashed network boundaries, Azure-blue service tiles, and blue numbered callouts.
+- AWS Reference Architecture: account/VPC/domain containers, service-category colors, data lake/governance/processing/analytics bands, and blue numbered review callouts.
+- Data Platform Pipeline: Sources -> Process -> Store -> Serve, lower governance/platform bands, green numbered callouts, and data-tier state labels such as bronze/silver/gold when present.
+- Presentation Architecture: dark or branded canvas, large central subject, sparse text, high-contrast accent color, and fewer callouts.
+- Enterprise Reference Architecture: source/control -> control plane -> targets -> evidence/reports -> consumers, semantic edge colors, trust boundaries, and numbered flow legend.
+
+Do not blindly apply one style to all diagrams. Match the visual pattern to the audience, vendor, and diagram purpose.
 
 ## Executive Readability Rules
 
@@ -216,6 +229,7 @@ Before final response, validate:
 - Busy edge labels are shortened or numbered with full descriptions moved to a legend.
 - Page 1 has enough spacing for nodes, labels, and routed arrows to avoid overlaps.
 - `page-plan.md` exists and separates executive content from detail, security, data/evidence, and operations content.
+- `visual-guide.md` exists and selects the reference visual pattern, layout rules, callout rules, and quality gates.
 - No raw secrets.
 - Output files exist.
 - Diagram summary exists.
@@ -271,6 +285,7 @@ The helper writes:
 - `diagram.drawio`
 - `diagram-summary.md`
 - `page-plan.md`
+- `visual-guide.md`
 - `assumptions.md`
 - `adversarial-review.md`
 - `quality-checklist.md`
@@ -315,11 +330,12 @@ Return:
 1. What was generated.
 2. Output file paths.
 3. Page-plan summary.
-4. How validation was performed.
-5. Assumptions and unknowns.
-6. Adversarial review summary.
-7. Known limitations.
-8. Suggested follow-up diagrams.
+4. Visual-guide summary.
+5. How validation was performed.
+6. Assumptions and unknowns.
+7. Adversarial review summary.
+8. Known limitations.
+9. Suggested follow-up diagrams.
 
 Be blunt about limitations. Do not claim unsupported parsing, official research, rendering, or icon licensing work happened unless it actually happened.
 

@@ -94,6 +94,11 @@ class DrawioXmlTests(unittest.TestCase):
         self.assertIn("strokeColor=#dc2626", cells["edge-sensitive"].attrib["style"])
         self.assertIn("dashed=1", cells["edge-sensitive"].attrib["style"])
         self.assertIn("1: Project sync pulls latest SHC repository", cells["__legend"].attrib["value"])
+        self.assertEqual("1", cells["__badge_edge-control"].attrib["value"])
+        self.assertIn("ellipse", cells["__badge_edge-control"].attrib["style"])
+        self.assertIn("fillColor=#4f46e5", cells["__badge_edge-control"].attrib["style"])
+        self.assertEqual("2", cells["__badge_edge-collect"].attrib["value"])
+        self.assertIn("fillColor=#2f9e44", cells["__badge_edge-collect"].attrib["style"])
 
     def test_enterprise_layout_uses_wide_readable_nodes_and_trust_boundaries(self):
         diagram = Diagram(

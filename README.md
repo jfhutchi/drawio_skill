@@ -2,7 +2,7 @@
 
 `enterprise-drawio-diagrammer` is an agent skill and Python helper package for producing professional diagrams.net / draw.io diagrams from architecture requests, notes, and common infrastructure files.
 
-The skill is designed around a structured intermediate model. The agent extracts components and flows, plans what belongs on executive and detail pages, reviews the model adversarially, improves it, generates uncompressed `.drawio` XML, validates the result, and writes supporting review artifacts.
+The skill is designed around a structured intermediate model. The agent extracts components and flows, plans what belongs on executive and detail pages, selects a reference visual pattern, reviews the model adversarially, improves it, generates uncompressed `.drawio` XML, validates the result, and writes supporting review artifacts.
 
 ## Quick Start
 
@@ -75,6 +75,7 @@ The helper writes:
 - `output/diagram.drawio`
 - `output/diagram-summary.md`
 - `output/page-plan.md`
+- `output/visual-guide.md`
 - `output/assumptions.md`
 - `output/adversarial-review.md`
 - `output/quality-checklist.md`
@@ -129,6 +130,7 @@ The skill instructions are broader than the helper. When an AI agent has web sea
 - `adversarial_review.py`: hostile review and safe model improvements.
 - `layout_engine.py`: deterministic enterprise layout heuristics.
 - `page_planner.py`: recommends Page 1 versus detail, security, data/evidence, and operations follow-up content.
+- `visual_patterns.py`: recommends Azure, AWS, data-platform, presentation, or enterprise reference visual patterns.
 - `icon_registry.py`: built-in draw.io style mappings with safe fallbacks.
 - `drawio_xml.py`: XML generation from the intermediate model.
 - `validators.py`: model/XML validation and secret redaction.

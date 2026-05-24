@@ -7,6 +7,7 @@ This implementation is intentionally portable and dependency-light. It provides 
 - The CLI does not perform live web research. The skill instructs the agent to research official sources when search or local documentation tools are available.
 - File extraction is heuristic. It recognizes common infrastructure and architecture patterns, but it is not a complete Terraform, Kubernetes, OpenAPI, Mermaid, PlantUML, or source-code parser.
 - Multi-page draw.io generation is documented and planned through `page-plan.md`, but the helper CLI still emits one `.drawio` page.
+- Reference visual patterns are written to `visual-guide.md`, but the helper still uses safe built-in shapes rather than licensed official vendor icon packs.
 - PNG/SVG export requires external diagrams.net or draw.io desktop tooling and is not bundled.
 - Official vendor icon packs are not embedded. The default registry uses safe built-in shapes and aliases.
 - Layout is deterministic and readable for moderate diagrams, but very large systems should be split into pages or separate diagrams.
@@ -23,4 +24,5 @@ This implementation is intentionally portable and dependency-light. It provides 
 - Add multi-page XML generation.
 - Add diagrams.net CLI rendering integration for SVG/PNG verification.
 - Add official cloud icon mapping where licensing permits it.
+- Add rendered screenshot validation for spacing, badge placement, and visual overlap.
 - Add complexity scoring and automatic multi-page `.drawio` emission from `page-plan.md`.

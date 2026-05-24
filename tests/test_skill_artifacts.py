@@ -15,6 +15,8 @@ class SkillArtifactTests(unittest.TestCase):
             root / "schemas" / "diagram-model.schema.json",
             root / "prompts" / "adversarial-review.md",
             root / "validation" / "drawio-validation-checklist.md",
+            root / "src" / "drawio_generator" / "visual_patterns.py",
+            root / "src" / "drawio_generator" / "page_planner.py",
             root / "docs" / "extending-the-skill.md",
             root / "docs" / "limitations.md",
             root / "validation" / "validate_drawio.py",
@@ -46,6 +48,14 @@ class SkillArtifactTests(unittest.TestCase):
 
         self.assertIn("page-plan.md", skill)
         self.assertIn("page-plan.md", readme)
+
+    def test_skill_and_readme_document_visual_guide_output(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "SKILL.md").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("visual-guide.md", skill)
+        self.assertIn("visual-guide.md", readme)
 
 
 if __name__ == "__main__":

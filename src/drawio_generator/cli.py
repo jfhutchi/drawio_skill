@@ -14,6 +14,7 @@ from .file_ingestion import ExtractionResult, extract_components_from_text, load
 from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
+from .visual_patterns import recommend_visual_pattern, render_visual_guide
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     improved = improve_diagram(diagram, initial_findings)
     final_findings = review_diagram(improved)
     page_plan = build_page_plan(improved)
+    visual_pattern = recommend_visual_pattern(improved, request)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
     if model_issues:
@@ -49,9 +51,13 @@ def main(argv: list[str] | None = None) -> int:
     (output_dir / "diagram.drawio").write_text(drawio_xml, encoding="utf-8")
     (output_dir / "diagram-summary.md").write_text(render_summary(improved), encoding="utf-8")
     (output_dir / "page-plan.md").write_text(render_page_plan(page_plan), encoding="utf-8")
+    (output_dir / "visual-guide.md").write_text(render_visual_guide(visual_pattern), encoding="utf-8")
     (output_dir / "assumptions.md").write_text(render_assumptions(improved), encoding="utf-8")
     (output_dir / "adversarial-review.md").write_text(render_adversarial_review(initial_findings, final_findings), encoding="utf-8")
-    (output_dir / "quality-checklist.md").write_text(render_quality_checklist(improved, xml_issues, has_page_plan=True), encoding="utf-8")
+    (output_dir / "quality-checklist.md").write_text(
+        render_quality_checklist(improved, xml_issues, has_page_plan=True, has_visual_guide=True),
+        encoding="utf-8",
+    )
     (output_dir / "research-summary.md").write_text(render_research_summary(request, diagram_type), encoding="utf-8")
 
     print(f"Wrote draw.io diagram and review artifacts to {output_dir}")
@@ -409,10 +415,16 @@ def render_assumptions(diagram: Diagram) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_quality_checklist(diagram: Diagram, xml_issues: list[object], has_page_plan: bool = False) -> str:
+def render_quality_checklist(
+    diagram: Diagram,
+    xml_issues: list[object],
+    has_page_plan: bool = False,
+    has_visual_guide: bool = False,
+) -> str:
     checks = [
         "Clear title and context statement",
         "Page plan separates executive and detail content",
+        "Visual guide selects a reference-quality pattern",
         "Legend present",
         "Directional arrows with labels",
         "Boundary included when relevant",
@@ -424,16 +436,24 @@ def render_quality_checklist(diagram: Diagram, xml_issues: list[object], has_pag
     ]
     lines = ["# Quality Checklist", ""]
     for check in checks:
-        lines.append(f"- [{'x' if _check_passes(check, diagram, xml_issues, has_page_plan) else ' '}] {check}")
+        lines.append(f"- [{'x' if _check_passes(check, diagram, xml_issues, has_page_plan, has_visual_guide) else ' '}] {check}")
     lines.extend(["", "## Model Quality Checks", *[f"- {item}" for item in diagram.quality_checks]])
     if xml_issues:
         lines.extend(["", "## XML Validation Issues", *[f"- {issue}" for issue in xml_issues]])
     return "\n".join(lines) + "\n"
 
 
-def _check_passes(check: str, diagram: Diagram, xml_issues: list[object], has_page_plan: bool = False) -> bool:
+def _check_passes(
+    check: str,
+    diagram: Diagram,
+    xml_issues: list[object],
+    has_page_plan: bool = False,
+    has_visual_guide: bool = False,
+) -> bool:
     if check == "Page plan separates executive and detail content":
         return has_page_plan
+    if check == "Visual guide selects a reference-quality pattern":
+        return has_visual_guide
     if check == "Legend present":
         return bool(diagram.legends)
     if check == "Boundary included when relevant":
