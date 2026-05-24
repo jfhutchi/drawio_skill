@@ -9,12 +9,21 @@
     "operations": "#d5e8d4",
     "data": "#fff2cc",
     "infrastructure": "#f5f5f5",
-    "risk": "#f8cecc"
+    "risk": "#f8cecc",
+    "boundary": "#f8fbff",
+    "trustBoundary": "#fffafa",
+    "controlFlow": "#4f46e5",
+    "targetCollectionFlow": "#2f9e44",
+    "reportEvidenceFlow": "#d97706",
+    "optionalFlow": "#6c757d",
+    "securityFlow": "#dc2626"
   },
   "rules": [
     "Use red only for risk, error, or blocked paths.",
     "Use green only for healthy operations or approved workflow states.",
     "Use dashed outlines for trust, environment, cloud, or ownership boundaries.",
+    "Use short numbered edge labels on dense executive diagrams and move details into the legend.",
+    "Keep Page 1 light, spacious, and readable with dark text on light fills.",
     "Keep labels readable and avoid unnecessary acronyms."
   ]
 }

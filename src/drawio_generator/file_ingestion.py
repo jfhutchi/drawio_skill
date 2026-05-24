@@ -42,6 +42,8 @@ class ExtractionResult:
 
 
 KNOWN_COMPONENTS: list[tuple[str, str, str]] = [
+    ("GitHub Repository", "github repository", "repository"),
+    ("Source Control Repository", "source control repository", "repository"),
     ("Azure Front Door", "azure front door", "cdn"),
     ("Application Gateway WAF", "application gateway waf", "waf"),
     ("Application Gateway", "application gateway", "gateway"),
@@ -60,6 +62,13 @@ KNOWN_COMPONENTS: list[tuple[str, str, str]] = [
     ("Log Analytics", "log analytics", "logging"),
     ("OpenTelemetry Collector", "opentelemetry collector", "monitoring"),
     ("RabbitMQ", "rabbitmq", "queue"),
+    ("Linux Server", "linux server", "linux_server"),
+    ("Linux Server", "linux servers", "linux_server"),
+    ("Windows Server", "windows server", "windows_server"),
+    ("Windows Server", "windows servers", "windows_server"),
+    ("IIS", "iis", "server"),
+    ("PgBouncer", "pgbouncer", "server"),
+    ("Zabbix", "zabbix", "monitoring"),
     ("Kafka", "kafka", "queue"),
     ("Redis", "redis", "cache"),
     ("Docker", "docker", "container"),
@@ -69,6 +78,17 @@ KNOWN_COMPONENTS: list[tuple[str, str, str]] = [
     ("Delinea Secret Server", "delinea secret server", "secret"),
     ("Ansible Tower", "ansible tower", "ansible"),
     ("AWX", "awx", "ansible"),
+    ("Tower Runtime Inputs", "tower runtime inputs", "process"),
+    ("SHC Role Execution", "shc role execution", "process"),
+    ("Controller Runtime Workspace", "controller runtime workspace", "process"),
+    ("Collected Health Data", "collected health data", "report"),
+    ("Report Generation", "report generation", "report"),
+    ("Customer Excel Workbooks", "customer excel workbooks", "workbook"),
+    ("Excel Workbook", "excel workbook", "workbook"),
+    ("Report Consumers", "report consumers", "consumer"),
+    ("Secure File Storage (SFS)", "secure file storage", "object_storage"),
+    ("Secure File Storage (SFS)", "sfs", "object_storage"),
+    ("Object Storage", "object storage", "object_storage"),
 ]
 
 
@@ -127,7 +147,12 @@ def load_inputs(input_files: list[str] | None, input_dir: str | None) -> Extract
 
 def _extract_known_components(text: str, result: ExtractionResult) -> None:
     lowered = text.lower()
+    tower_awx_combined = "ansible tower" in lowered and "awx" in lowered
+    if tower_awx_combined:
+        _add_component(result, "Ansible Tower / AWX", "ansible")
     for label, needle, node_type in KNOWN_COMPONENTS:
+        if tower_awx_combined and label in {"Ansible Tower", "AWX"}:
+            continue
         if needle in lowered:
             _add_component(result, label, node_type)
 

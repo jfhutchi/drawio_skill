@@ -19,18 +19,30 @@ VERTICAL_LAYERS = [
 ]
 
 HORIZONTAL_TYPES = {"cicd", "workflow", "sequence", "code"}
+ENTERPRISE_HORIZONTAL_TYPES = {"enterprise", "cloud"}
+MIN_ENTERPRISE_NODE_WIDTH = 190
+MIN_ENTERPRISE_NODE_HEIGHT = 90
+ENTERPRISE_GROUP_ORDER = [
+    "boundary-source-control",
+    "boundary-automation-control",
+    "boundary-customer-infrastructure",
+    "boundary-controller-workspace",
+    "boundary-reporting-evidence",
+    "boundary-optional-external-storage",
+    "boundary-report-consumers",
+]
 
 
 def infer_layer(node: Node) -> str:
     node_type = (node.node_type or "").lower()
     label = node.label.lower()
-    if node_type in {"actor", "user"} or "user" in label:
+    if node_type in {"actor", "user", "consumer"} or any(term in label for term in ["user", "consumer", "reviewer", "engineer"]):
         return "users"
     if node_type in {"cdn", "gateway", "waf", "firewall", "network"}:
         return "edge"
-    if node_type in {"database", "cache", "queue", "data"} or any(term in label for term in ["postgres", "sql", "redis", "queue", "kafka", "rabbitmq"]):
+    if node_type in {"database", "cache", "queue", "data", "object_storage", "workbook", "report"} or any(term in label for term in ["postgres", "sql", "redis", "queue", "kafka", "rabbitmq", "sfs", "report", "workbook", "excel"]):
         return "data"
-    if node_type in {"kubernetes", "container", "server", "terraform", "ansible"}:
+    if node_type in {"kubernetes", "container", "server", "linux_server", "windows_server", "terraform", "ansible"}:
         return "platform"
     if node_type in {"identity", "secret", "security"} or any(term in label for term in ["vault", "iam", "sso", "mfa", "rbac", "pam", "siem"]):
         return "security"
@@ -45,19 +57,34 @@ def apply_layout(diagram: Diagram) -> Diagram:
     """Return a laid-out copy of the model without mutating the input."""
 
     laid_out = deepcopy(diagram)
-    horizontal = laid_out.diagram_type.lower() in HORIZONTAL_TYPES or laid_out.direction.lower() == "left-to-right"
+    diagram_type = laid_out.diagram_type.lower()
+    horizontal = (
+        diagram_type in HORIZONTAL_TYPES
+        or diagram_type in ENTERPRISE_HORIZONTAL_TYPES
+        or laid_out.direction.lower() == "left-to-right"
+    )
 
     for node in laid_out.nodes:
         if not node.layer:
             node.layer = infer_layer(node)
+        _normalize_node_size(laid_out, node)
 
-    if horizontal:
+    if horizontal and diagram_type in ENTERPRISE_HORIZONTAL_TYPES:
+        _layout_enterprise_horizontal(laid_out)
+    elif horizontal:
         _layout_horizontal(laid_out)
     else:
         _layout_vertical(laid_out)
 
     _layout_boundaries(laid_out)
     return laid_out
+
+
+def _normalize_node_size(diagram: Diagram, node: Node) -> None:
+    if diagram.diagram_type.lower() not in ENTERPRISE_HORIZONTAL_TYPES:
+        return
+    node.width = max(node.width, MIN_ENTERPRISE_NODE_WIDTH)
+    node.height = max(node.height, MIN_ENTERPRISE_NODE_HEIGHT)
 
 
 def _layout_vertical(diagram: Diagram) -> None:
@@ -88,6 +115,38 @@ def _layout_horizontal(diagram: Diagram) -> None:
         node.x = x
         node.y = y_base + (index % 2) * 105
         x += node.width + 55
+
+
+def _layout_enterprise_horizontal(diagram: Diagram) -> None:
+    grouped = _group_enterprise_nodes(diagram.nodes)
+    x = 80
+    top_y = 165
+    column_gap = 70
+    node_gap = 36
+
+    for group_id in _ordered_group_ids(grouped):
+        nodes = grouped[group_id]
+        y = top_y
+        column_width = max(node.width for node in nodes)
+        for node in nodes:
+            node.x = x
+            node.y = y
+            y += node.height + node_gap
+        x += column_width + column_gap
+
+
+def _group_enterprise_nodes(nodes: list[Node]) -> dict[str, list[Node]]:
+    grouped: dict[str, list[Node]] = {}
+    for node in nodes:
+        group_id = node.group or f"__layer_{node.layer or infer_layer(node)}"
+        grouped.setdefault(group_id, []).append(node)
+    return grouped
+
+
+def _ordered_group_ids(grouped: dict[str, list[Node]]) -> list[str]:
+    known = [group_id for group_id in ENTERPRISE_GROUP_ORDER if group_id in grouped]
+    unknown = sorted(group_id for group_id in grouped if group_id not in ENTERPRISE_GROUP_ORDER)
+    return [*known, *unknown]
 
 
 def _layout_boundaries(diagram: Diagram) -> None:

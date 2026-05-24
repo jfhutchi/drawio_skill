@@ -11,6 +11,7 @@ from .adversarial_review import improve_diagram, render_adversarial_review, revi
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
 from .drawio_xml import generate_drawio_xml
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
+from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
 
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     initial_findings = review_diagram(diagram)
     improved = improve_diagram(diagram, initial_findings)
     final_findings = review_diagram(improved)
+    page_plan = build_page_plan(improved)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
     if model_issues:
@@ -46,9 +48,10 @@ def main(argv: list[str] | None = None) -> int:
 
     (output_dir / "diagram.drawio").write_text(drawio_xml, encoding="utf-8")
     (output_dir / "diagram-summary.md").write_text(render_summary(improved), encoding="utf-8")
+    (output_dir / "page-plan.md").write_text(render_page_plan(page_plan), encoding="utf-8")
     (output_dir / "assumptions.md").write_text(render_assumptions(improved), encoding="utf-8")
     (output_dir / "adversarial-review.md").write_text(render_adversarial_review(initial_findings, final_findings), encoding="utf-8")
-    (output_dir / "quality-checklist.md").write_text(render_quality_checklist(improved, xml_issues), encoding="utf-8")
+    (output_dir / "quality-checklist.md").write_text(render_quality_checklist(improved, xml_issues, has_page_plan=True), encoding="utf-8")
     (output_dir / "research-summary.md").write_text(render_research_summary(request, diagram_type), encoding="utf-8")
 
     print(f"Wrote draw.io diagram and review artifacts to {output_dir}")
@@ -109,19 +112,24 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
     boundaries = _build_boundaries(diagram_type, nodes, request)
     edges = _build_edges(nodes, extraction.relationships)
     title = _title_from_request(request, diagram_type)
+    direction = layout or ("left-to-right" if diagram_type in {"enterprise", "cloud", "cicd", "workflow", "code"} else "top-to-bottom")
+    _assign_node_groups(nodes, boundaries, diagram_type)
     diagram = Diagram(
         title=title,
         subtitle=f"{audience.title()} view generated from request and supplied files",
         diagram_type=diagram_type,
         audience=audience,
-        direction=layout or ("left-to-right" if diagram_type in {"cicd", "workflow", "code"} else "top-to-bottom"),
+        direction=direction,
+        layout_strategy="executive-flow" if direction == "left-to-right" and diagram_type in {"enterprise", "cloud"} else "layered",
         boundaries=boundaries,
         nodes=nodes,
         edges=edges,
         legends=[
-            LegendItem("Blue", "Application, platform, and network services"),
-            LegendItem("Purple", "Identity, secrets, and security controls"),
-            LegendItem("Green", "Operations, telemetry, and workflow steps"),
+            LegendItem("Blue/Purple", "Control flow and orchestration"),
+            LegendItem("Green", "Target collection and health checks"),
+            LegendItem("Yellow", "Evidence, report, and workbook flow"),
+            LegendItem("Gray dashed", "Optional external storage path"),
+            LegendItem("Red dashed", "Sensitive security or secret path"),
         ],
         assumptions=[
             "Relationships are generated from explicit text when available, then completed with conservative enterprise flow heuristics.",
@@ -132,9 +140,6 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
         ],
         sources=extraction.sources or ["request"],
     )
-    for node in diagram.nodes:
-        if boundaries and not node.group:
-            node.group = boundaries[0].id
     return diagram
 
 
@@ -169,6 +174,10 @@ def _build_boundaries(diagram_type: str, nodes: list[Node], request: str) -> lis
         return [Boundary(id="boundary-cluster", label="Kubernetes Cluster / Namespace Boundary", boundary_type="platform")]
     if diagram_type == "security":
         return [Boundary(id="boundary-trust", label="Trust Boundary", boundary_type="trust")]
+    if diagram_type in {"enterprise", "cloud"}:
+        semantic_boundaries = _build_enterprise_boundaries(nodes)
+        if semantic_boundaries:
+            return semantic_boundaries
     if "azure" in request.lower() or any("Azure" in node.label or node.label == "AKS" for node in nodes):
         return [Boundary(id="boundary-azure", label="Azure Subscription / Region", boundary_type="cloud")]
     if diagram_type in {"enterprise", "cloud", "network"}:
@@ -176,35 +185,127 @@ def _build_boundaries(diagram_type: str, nodes: list[Node], request: str) -> lis
     return []
 
 
+def _build_enterprise_boundaries(nodes: list[Node]) -> list[Boundary]:
+    specs = [
+        ("boundary-source-control", "Source Control Zone", "logical"),
+        ("boundary-automation-control", "Automation Control Zone", "logical"),
+        ("boundary-customer-infrastructure", "Customer Infrastructure Trust Boundary", "trust"),
+        ("boundary-controller-workspace", "Controller Workspace Zone", "logical"),
+        ("boundary-reporting-evidence", "Reporting / Evidence Zone", "logical"),
+        ("boundary-optional-external-storage", "Optional External Storage Trust Boundary", "trust"),
+        ("boundary-report-consumers", "Report Consumers", "logical"),
+    ]
+    matched_groups = {_enterprise_group_for_node(node) for node in nodes}
+    return [
+        Boundary(id=group_id, label=label, boundary_type=boundary_type)
+        for group_id, label, boundary_type in specs
+        if group_id in matched_groups
+    ]
+
+
+def _assign_node_groups(nodes: list[Node], boundaries: list[Boundary], diagram_type: str) -> None:
+    if not boundaries:
+        return
+    boundary_ids = {boundary.id for boundary in boundaries}
+    if diagram_type in {"enterprise", "cloud"}:
+        for node in nodes:
+            group_id = _enterprise_group_for_node(node)
+            if group_id in boundary_ids:
+                node.group = group_id
+            elif not node.group:
+                node.group = boundaries[0].id
+        return
+    for node in nodes:
+        if not node.group:
+            node.group = boundaries[0].id
+
+
+def _enterprise_group_for_node(node: Node) -> str:
+    text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["consumer", "reviewer", "engineer", "auditor", "stakeholder"]):
+        return "boundary-report-consumers"
+    if any(term in text for term in ["sfs", "object storage", "file share", "external storage"]):
+        return "boundary-optional-external-storage"
+    if any(term in text for term in ["secret", "vault", "credential"]):
+        return "boundary-automation-control"
+    if any(term in text for term in ["report", "workbook", "excel", "evidence", "artifact", "dashboard"]):
+        return "boundary-reporting-evidence"
+    if any(term in text for term in ["controller workspace", "runtime workspace", "collected health data", "staged results"]):
+        return "boundary-controller-workspace"
+    if any(term in text for term in ["target", "linux", "windows", "server", "postgres", "rabbitmq", "iis", "pgbouncer", "zabbix", "database", "queue", "kubernetes"]):
+        return "boundary-customer-infrastructure"
+    if any(term in text for term in ["tower", "awx", "ansible", "terraform", "job template", "workflow", "orchestration", "pipeline", "process"]):
+        return "boundary-automation-control"
+    if any(term in text for term in ["github repository", "repository", "source control", "gitlab"]):
+        return "boundary-source-control"
+    return "boundary-automation-control"
+
+
 def _build_edges(nodes: list[Node], extracted: list[Edge]) -> list[Edge]:
     node_ids = {node.id for node in nodes}
     edges: list[Edge] = [edge for edge in extracted if edge.source in node_ids and edge.target in node_ids]
     labels = {node.label.lower(): node for node in nodes}
 
-    def add_if_present(source_names: list[str], target_names: list[str], label: str, protocol: str | None = None) -> None:
+    def add_if_present(
+        source_names: list[str],
+        target_names: list[str],
+        label: str,
+        protocol: str | None = None,
+        flow_type: str = "control",
+    ) -> None:
         source = _find_node(labels, source_names)
         target = _find_node(labels, target_names)
         if source and target and source.id != target.id:
             edge_id = f"edge-{source.id}-{target.id}"
             if not any(edge.id == edge_id for edge in edges):
-                edges.append(Edge(id=edge_id, source=source.id, target=target.id, label=label, protocol=protocol))
+                edges.append(Edge(id=edge_id, source=source.id, target=target.id, label=label, protocol=protocol, metadata={"flow_type": flow_type}))
 
     add_if_present(["azure front door"], ["application gateway waf", "application gateway", "aks"], "HTTPS ingress", "HTTPS")
     add_if_present(["application gateway waf", "application gateway"], ["aks", "azure kubernetes service"], "WAF-routed HTTPS", "HTTPS")
-    add_if_present(["aks", "azure kubernetes service"], ["key vault", "delinea secret server"], "retrieves secrets", "TLS")
-    add_if_present(["aks", "azure kubernetes service"], ["azure database for postgresql", "postgresql"], "SQL over TLS", "TLS")
+    add_if_present(["aks", "azure kubernetes service"], ["key vault", "delinea secret server"], "retrieves secrets", "TLS", "security_sensitive")
+    add_if_present(["aks", "azure kubernetes service"], ["azure database for postgresql", "postgresql"], "SQL over TLS", "TLS", "target_collection")
     add_if_present(["github actions"], ["terraform"], "runs plan/apply")
     add_if_present(["terraform"], ["aks", "azure kubernetes service", "key vault", "azure database for postgresql"], "provisions")
-    add_if_present(["prometheus"], ["grafana"], "dashboard data")
-    add_if_present(["aks", "azure kubernetes service"], ["prometheus"], "metrics scrape")
-    add_if_present(["aks", "azure kubernetes service"], ["log analytics"], "logs and diagnostics")
-    add_if_present(["opentelemetry collector"], ["prometheus", "grafana", "log analytics"], "exports telemetry")
+    add_if_present(["prometheus"], ["grafana"], "dashboard data", flow_type="report_evidence")
+    add_if_present(["aks", "azure kubernetes service"], ["prometheus"], "metrics scrape", flow_type="target_collection")
+    add_if_present(["aks", "azure kubernetes service"], ["log analytics"], "logs and diagnostics", flow_type="report_evidence")
+    add_if_present(["opentelemetry collector"], ["prometheus", "grafana", "log analytics"], "exports telemetry", flow_type="report_evidence")
+    add_if_present(["github repository"], ["ansible tower", "awx"], "Project sync pulls latest SHC repository", flow_type="control")
+    add_if_present(["ansible tower", "awx"], ["linux server", "windows server", "target platforms", "postgresql", "rabbitmq", "iis", "pgbouncer"], "Collect health and security evidence", flow_type="target_collection")
+    add_if_present(["ansible tower", "awx"], ["delinea secret server", "key vault"], "Retrieve runtime secrets", "TLS", "security_sensitive")
+    add_if_present(["target platforms", "linux server", "windows server", "postgresql", "rabbitmq"], ["report generation", "excel workbook", "customer excel workbooks"], "Stage evidence for workbook generation", flow_type="report_evidence")
+    add_if_present(["report generation", "excel workbook", "customer excel workbooks"], ["report consumers"], "Completed report for review", flow_type="report_evidence")
+    add_if_present(["report generation", "excel workbook", "customer excel workbooks"], ["sfs", "object storage"], "Optional secure SFS upload path", flow_type="optional_storage")
 
     if not edges and len(nodes) > 1:
         ordered = sorted(nodes, key=lambda node: _flow_rank(node.node_type, node.label))
         for index, (source, target) in enumerate(zip(ordered, ordered[1:]), start=1):
             edges.append(Edge(id=f"edge-flow-{index}", source=source.id, target=target.id, label="architecture flow"))
+    _number_edges(edges)
     return edges
+
+
+def _number_edges(edges: list[Edge]) -> None:
+    for index, edge in enumerate(edges, start=1):
+        edge.metadata.setdefault("sequence", index)
+        edge.metadata.setdefault("flow_type", _infer_flow_type(edge))
+
+
+def _infer_flow_type(edge: Edge) -> str:
+    text = " ".join(
+        item
+        for item in [edge.label, edge.protocol or "", edge.security_control or "", edge.data_classification or ""]
+        if item
+    ).lower()
+    if any(term in text for term in ["secret", "credential", "vault", "token"]):
+        return "security_sensitive"
+    if any(term in text for term in ["optional", "sfs", "object storage", "external storage"]):
+        return "optional_storage"
+    if any(term in text for term in ["report", "evidence", "workbook", "excel", "telemetry", "dashboard", "logs"]):
+        return "report_evidence"
+    if any(term in text for term in ["collect", "target", "metrics", "health", "scrape", "sql"]):
+        return "target_collection"
+    return "control"
 
 
 def _find_node(labels: dict[str, Node], names: list[str]) -> Node | None:
@@ -308,9 +409,10 @@ def render_assumptions(diagram: Diagram) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_quality_checklist(diagram: Diagram, xml_issues: list[object]) -> str:
+def render_quality_checklist(diagram: Diagram, xml_issues: list[object], has_page_plan: bool = False) -> str:
     checks = [
         "Clear title and context statement",
+        "Page plan separates executive and detail content",
         "Legend present",
         "Directional arrows with labels",
         "Boundary included when relevant",
@@ -322,14 +424,16 @@ def render_quality_checklist(diagram: Diagram, xml_issues: list[object]) -> str:
     ]
     lines = ["# Quality Checklist", ""]
     for check in checks:
-        lines.append(f"- [{'x' if _check_passes(check, diagram, xml_issues) else ' '}] {check}")
+        lines.append(f"- [{'x' if _check_passes(check, diagram, xml_issues, has_page_plan) else ' '}] {check}")
     lines.extend(["", "## Model Quality Checks", *[f"- {item}" for item in diagram.quality_checks]])
     if xml_issues:
         lines.extend(["", "## XML Validation Issues", *[f"- {issue}" for issue in xml_issues]])
     return "\n".join(lines) + "\n"
 
 
-def _check_passes(check: str, diagram: Diagram, xml_issues: list[object]) -> bool:
+def _check_passes(check: str, diagram: Diagram, xml_issues: list[object], has_page_plan: bool = False) -> bool:
+    if check == "Page plan separates executive and detail content":
+        return has_page_plan
     if check == "Legend present":
         return bool(diagram.legends)
     if check == "Boundary included when relevant":

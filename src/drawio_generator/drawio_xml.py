@@ -46,8 +46,8 @@ def generate_drawio_xml(diagram: Diagram) -> str:
         _add_boundary(root, boundary)
     for node in laid_out.nodes:
         _add_node(root, node)
-    if laid_out.legends:
-        _add_legend(root, laid_out.legends)
+    if laid_out.legends or _flow_legend_rows(laid_out.edges):
+        _add_legend(root, laid_out.legends, laid_out.edges)
     for edge in laid_out.edges:
         _add_edge(root, edge)
 
@@ -64,9 +64,10 @@ def _page_size(diagram: Diagram) -> tuple[int, int]:
     for node in diagram.nodes:
         max_x = max(max_x, (node.x or 0) + node.width + 80)
         max_y = max(max_y, (node.y or 0) + node.height + 80)
-    if diagram.legends:
-        max_x = max(max_x, 1180)
-        max_y = max(max_y, 160 + len(diagram.legends) * 30)
+    legend_rows = ["Legend", *diagram.legends, *_flow_legend_rows(diagram.edges)]
+    if len(legend_rows) > 1:
+        max_x = max(max_x, 1300)
+        max_y = max(max_y, 105 + len(legend_rows) * 24)
     return max_x, max_y
 
 
@@ -92,11 +93,7 @@ def _add_title(root: ET.Element, diagram: Diagram) -> None:
 
 
 def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
-    style = (
-        "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;"
-        "fillColor=#ffffff;strokeColor=#6c757d;verticalAlign=top;align=left;"
-        "spacingTop=10;spacingLeft=12;fontStyle=1;fontColor=#495057;"
-    )
+    style = _boundary_style(boundary)
     cell = ET.SubElement(
         root,
         "mxCell",
@@ -150,16 +147,13 @@ def _add_node(root: ET.Element, node: Node) -> None:
 
 
 def _add_edge(root: ET.Element, edge: Edge) -> None:
-    style = edge.style or (
-        "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;"
-        "html=1;endArrow=block;endFill=1;strokeColor=#495057;fontColor=#343a40;"
-    )
+    style = edge.style or _edge_style(edge)
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": edge.id,
-            "value": edge.label,
+            "value": _edge_value(edge),
             "style": style,
             "edge": "1",
             "parent": "1",
@@ -170,8 +164,8 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
     ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
 
 
-def _add_legend(root: ET.Element, legends: list[LegendItem]) -> None:
-    rows = ["Legend", *[f"{item.label}: {item.meaning}" for item in legends]]
+def _add_legend(root: ET.Element, legends: list[LegendItem], edges: list[Edge]) -> None:
+    rows = ["Legend", *[f"{item.label}: {item.meaning}" for item in legends], *_flow_legend_rows(edges)]
     value = "\n".join(rows)
     cell = ET.SubElement(
         root,
@@ -184,4 +178,74 @@ def _add_legend(root: ET.Element, legends: list[LegendItem]) -> None:
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "900", "y": "30", "width": "230", "height": str(45 + len(legends) * 30), "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": "900", "y": "30", "width": "320", "height": str(45 + len(rows) * 24), "as": "geometry"})
+
+
+def _boundary_style(boundary: Boundary) -> str:
+    boundary_type = boundary.boundary_type.lower()
+    stroke = "#dc2626" if boundary_type in {"trust", "security"} else "#6c757d"
+    fill = "#fffafa" if boundary_type in {"trust", "security"} else "#f8fbff"
+    return (
+        "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;"
+        f"fillColor={fill};strokeColor={stroke};verticalAlign=top;align=left;"
+        "spacingTop=10;spacingLeft=12;fontStyle=1;fontColor=#343a40;"
+    )
+
+
+def _edge_style(edge: Edge) -> str:
+    flow_type = _flow_type(edge)
+    stroke = {
+        "control": "#4f46e5",
+        "target_collection": "#2f9e44",
+        "report_evidence": "#d97706",
+        "optional_storage": "#6c757d",
+        "security_sensitive": "#dc2626",
+    }.get(flow_type, "#495057")
+    dashed = "dashed=1;dashPattern=8 4;" if flow_type in {"optional_storage", "security_sensitive"} else ""
+    return (
+        "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;"
+        f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;strokeWidth=2;"
+        f"{dashed}"
+    )
+
+
+def _edge_value(edge: Edge) -> str:
+    display_label = edge.metadata.get("display_label")
+    if display_label is not None:
+        return str(display_label)
+    sequence = edge.metadata.get("sequence")
+    if sequence is not None:
+        return str(sequence)
+    return edge.label
+
+
+def _flow_legend_rows(edges: list[Edge]) -> list[str]:
+    rows: list[str] = []
+    for edge in edges:
+        sequence = edge.metadata.get("sequence")
+        if sequence is not None:
+            rows.append(f"{sequence}: {edge.label}")
+    return rows
+
+
+def _flow_type(edge: Edge) -> str:
+    flow_type = edge.metadata.get("flow_type")
+    if isinstance(flow_type, str) and flow_type:
+        return flow_type
+
+    text = " ".join(
+        item
+        for item in [edge.label, edge.protocol or "", edge.security_control or "", edge.data_classification or ""]
+        if item
+    ).lower()
+    if any(term in text for term in ["secret", "credential", "vault", "token"]):
+        return "security_sensitive"
+    if any(term in text for term in ["optional", "sfs", "object storage", "external storage"]):
+        return "optional_storage"
+    if any(term in text for term in ["report", "evidence", "workbook", "csv", "excel"]):
+        return "report_evidence"
+    if any(term in text for term in ["collect", "target", "health", "check"]):
+        return "target_collection"
+    if any(term in text for term in ["sync", "launch", "orchestrat", "control", "plan/apply"]):
+        return "control"
+    return "default"

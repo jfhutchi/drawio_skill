@@ -70,6 +70,25 @@ class FileIngestionTests(unittest.TestCase):
         self.assertIn("OpenTelemetry receiver: otlp", labels)
         self.assertIn("OpenTelemetry exporter: prometheus", labels)
 
+    def test_collapses_ansible_tower_and_awx_into_one_controller_node(self):
+        text = "Ansible Tower / AWX launches SHC jobs from a GitHub Repository."
+
+        result = extract_components_from_text("tower-notes.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("Ansible Tower / AWX", labels)
+        self.assertNotIn("Ansible Tower", labels)
+        self.assertNotIn("AWX", labels)
+
+    def test_extracts_shc_detail_nodes_for_page_planning(self):
+        text = "Tower Runtime Inputs feed SHC Role Execution before reports are generated."
+
+        result = extract_components_from_text("shc-notes.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("Tower Runtime Inputs", labels)
+        self.assertIn("SHC Role Execution", labels)
+
     def test_does_not_invent_relationships_from_component_lists(self):
         text = (
             "Azure Front Door receives public HTTPS traffic and forwards approved traffic to Application Gateway WAF. "

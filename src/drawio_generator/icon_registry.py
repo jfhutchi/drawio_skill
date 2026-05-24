@@ -6,12 +6,12 @@ from dataclasses import dataclass
 
 
 BASE_STYLE = (
-    "rounded=1;whiteSpace=wrap;html=1;arcSize=8;fontColor=#212529;"
+    "rounded=1;whiteSpace=wrap;html=1;arcSize=8;fontColor=#212529;fontSize=13;"
 )
 
 DEFAULT_STYLE = (
     "rounded=1;whiteSpace=wrap;html=1;arcSize=8;"
-    "fillColor=#f8f9fa;strokeColor=#6c757d;fontColor=#212529;"
+    "fillColor=#f8f9fa;strokeColor=#6c757d;fontColor=#212529;fontSize=13;"
 )
 
 
@@ -23,20 +23,23 @@ class IconStyle:
 
 
 STYLE_REGISTRY: dict[str, IconStyle] = {
-    "actor": IconStyle("general", "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#fff2cc;strokeColor=#d6b656;", "Actor"),
-    "user": IconStyle("general", "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#fff2cc;strokeColor=#d6b656;", "User"),
+    "actor": IconStyle("general", "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "Actor"),
+    "user": IconStyle("general", "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "User"),
     "frontend": IconStyle("application", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Frontend"),
     "api": IconStyle("application", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "API"),
     "backend": IconStyle("application", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Backend"),
     "worker": IconStyle("application", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Worker"),
     "process": IconStyle("workflow", BASE_STYLE + "fillColor=#d5e8d4;strokeColor=#82b366;", "Process"),
     "deployment": IconStyle("workflow", BASE_STYLE + "fillColor=#d5e8d4;strokeColor=#82b366;", "Deployment"),
-    "repository": IconStyle("devops", "shape=folder;tabWidth=40;tabHeight=14;tabPosition=left;html=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;", "Repository"),
-    "artifact": IconStyle("devops", "shape=package;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;", "Artifact"),
-    "database": IconStyle("data", "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;", "Database"),
-    "cache": IconStyle("data", "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;", "Cache"),
-    "queue": IconStyle("data", "shape=mxgraph.basic.queue;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;", "Queue"),
-    "cloud": IconStyle("cloud", "ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;", "Cloud"),
+    "repository": IconStyle("devops", "shape=folder;tabWidth=40;tabHeight=14;tabPosition=left;html=1;whiteSpace=wrap;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#212529;fontSize=13;", "Repository"),
+    "artifact": IconStyle("devops", "shape=package;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#212529;fontSize=13;", "Artifact"),
+    "workbook": IconStyle("data", "shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;size=16;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "Workbook"),
+    "report": IconStyle("data", "shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "Report"),
+    "database": IconStyle("data", "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "Database"),
+    "cache": IconStyle("data", "shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#212529;fontSize=13;", "Cache"),
+    "queue": IconStyle("data", "shape=mxgraph.basic.queue;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#212529;fontSize=13;", "Queue"),
+    "object_storage": IconStyle("data", "shape=cloud;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#6c757d;fontColor=#212529;fontSize=13;", "Object Storage"),
+    "cloud": IconStyle("cloud", "ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#212529;fontSize=13;", "Cloud"),
     "cdn": IconStyle("network", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "CDN"),
     "gateway": IconStyle("network", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Gateway"),
     "waf": IconStyle("security", BASE_STYLE + "fillColor=#e1d5e7;strokeColor=#9673a6;", "WAF"),
@@ -47,12 +50,15 @@ STYLE_REGISTRY: dict[str, IconStyle] = {
     "kubernetes": IconStyle("platform", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Kubernetes"),
     "container": IconStyle("platform", BASE_STYLE + "fillColor=#dae8fc;strokeColor=#6c8ebf;", "Container"),
     "server": IconStyle("infrastructure", BASE_STYLE + "fillColor=#f5f5f5;strokeColor=#666666;", "Server"),
+    "linux_server": IconStyle("infrastructure", "shape=mxgraph.cisco19.rect;prIcon=server;html=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#212529;fontSize=13;", "Linux Server"),
+    "windows_server": IconStyle("infrastructure", "shape=mxgraph.cisco19.rect;prIcon=server;html=1;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#212529;fontSize=13;", "Windows Server"),
     "network": IconStyle("network", BASE_STYLE + "fillColor=#f5f5f5;strokeColor=#666666;", "Network"),
     "monitoring": IconStyle("operations", BASE_STYLE + "fillColor=#d5e8d4;strokeColor=#82b366;", "Monitoring"),
     "logging": IconStyle("operations", BASE_STYLE + "fillColor=#d5e8d4;strokeColor=#82b366;", "Logging"),
     "dashboard": IconStyle("operations", BASE_STYLE + "fillColor=#d5e8d4;strokeColor=#82b366;", "Dashboard"),
     "terraform": IconStyle("devops", BASE_STYLE + "fillColor=#e1d5e7;strokeColor=#9673a6;", "Terraform"),
     "ansible": IconStyle("devops", BASE_STYLE + "fillColor=#e1d5e7;strokeColor=#9673a6;", "Ansible"),
+    "consumer": IconStyle("general", BASE_STYLE + "fillColor=#fff2cc;strokeColor=#d6b656;", "Consumer"),
 }
 
 
@@ -63,6 +69,8 @@ ALIASES: dict[str, str] = {
     "azure database for postgresql": "database",
     "key vault": "secret",
     "azure key vault": "secret",
+    "delinea secret server": "secret",
+    "github repository": "repository",
     "github actions": "process",
     "gitlab ci": "process",
     "jenkins": "process",
@@ -72,6 +80,14 @@ ALIASES: dict[str, str] = {
     "opentelemetry collector": "monitoring",
     "application gateway": "gateway",
     "azure front door": "cdn",
+    "excel": "workbook",
+    "excel workbook": "workbook",
+    "workbook": "workbook",
+    "sfs": "object_storage",
+    "object storage": "object_storage",
+    "linux": "linux_server",
+    "windows": "windows_server",
+    "report consumers": "consumer",
 }
 
 

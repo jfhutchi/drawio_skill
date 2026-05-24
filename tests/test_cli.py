@@ -70,8 +70,12 @@ class CliTests(unittest.TestCase):
             self.assertTrue((output / "assumptions.md").exists())
             self.assertTrue((output / "adversarial-review.md").exists())
             self.assertTrue((output / "quality-checklist.md").exists())
+            self.assertTrue((output / "page-plan.md").exists())
             ET.fromstring((output / "diagram.drawio").read_text(encoding="utf-8"))
             self.assertIn("AKS", (output / "diagram-summary.md").read_text(encoding="utf-8"))
+            page_plan = (output / "page-plan.md").read_text(encoding="utf-8")
+            self.assertIn("Executive Overview", page_plan)
+            self.assertIn("Page 1 should be understandable", page_plan)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,14 @@ class SkillArtifactTests(unittest.TestCase):
         self.assertIn("assumptions", schema["properties"])
         self.assertIn("unknowns", schema["properties"])
 
+    def test_skill_and_readme_document_page_plan_output(self):
+        root = Path(__file__).resolve().parents[1]
+        skill = (root / "SKILL.md").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("page-plan.md", skill)
+        self.assertIn("page-plan.md", readme)
+
 
 if __name__ == "__main__":
     unittest.main()

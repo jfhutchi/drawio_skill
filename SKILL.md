@@ -9,7 +9,7 @@ description: Use when a user asks for professional draw.io, diagrams.net, archit
 
 Create enterprise-quality draw.io / diagrams.net diagrams from natural-language requests and supplied files. Always produce valid `.drawio` XML and supporting review artifacts. The diagram should be useful to architects, SREs, security teams, developers, and executives, not just a collection of boxes.
 
-Use the helper package in `src/drawio_generator` when executable scripts are available. The helper creates a structured intermediate model, generates uncompressed draw.io XML, validates it, redacts secrets, writes review files, and gives the agent a solid first draft to improve.
+Use the helper package in `src/drawio_generator` when executable scripts are available. The helper creates a structured intermediate model, plans executive/detail pages, generates uncompressed draw.io XML, validates it, redacts secrets, writes review files, and gives the agent a solid first draft to improve.
 
 ## Required Workflow
 
@@ -23,13 +23,14 @@ Follow this sequence for every diagram request:
 6. Choose a notation and layout strategy.
 7. Map icons and stencils, using safe fallbacks when a precise icon is unavailable.
 8. Build an intermediate diagram model.
-9. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
-10. Improve the model based on review findings.
-11. Generate uncompressed draw.io XML.
-12. Validate XML and model references.
-13. Check visual quality and output files.
-14. Produce final files and a concise explanation.
-15. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+9. Build a page plan that separates the executive overview from implementation detail, security, data/evidence flow, and operations follow-up.
+10. Run adversarial review against completeness, accuracy, enterprise quality, visual quality, security, and operations.
+11. Improve the model based on review findings.
+12. Generate uncompressed draw.io XML.
+13. Validate XML and model references.
+14. Check visual quality and output files.
+15. Produce final files and a concise explanation.
+16. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
 
 Do not generate raw draw.io XML directly from unstructured prose. Always create or reason through the intermediate model first.
 
@@ -86,7 +87,7 @@ When relationships are ambiguous, create conservative flows and document the ass
 
 Use these default layouts:
 
-- Enterprise architecture: top-to-bottom from users/external systems to edge, application, data, platform, security, and operations.
+- Enterprise architecture: left-to-right executive flow from source/control systems, orchestration, targets, workspace/data objects, reports/evidence, optional storage, then consumers. Use wider swimlanes and avoid crossing zone boundaries unless the flow requires it.
 - Cloud architecture: group by tenant/account/subscription, region, VNet/VPC, subnet, availability zone, security boundary, and service tier.
 - Kubernetes: group by cluster, namespace, ingress, services, deployments, pods, config/secrets, persistent volumes, external services, observability, and CI/CD.
 - CI/CD: left-to-right from developer, repository, pull request, build, test, security scan, package, artifact registry, deploy, validate, monitor, rollback.
@@ -95,6 +96,40 @@ Use these default layouts:
 - Observability: sources, collectors, processors, exporters, storage/backend, dashboards, alerts, incident/runbook flow.
 
 Create multiple pages when one page would be unreadable. Recommended pages are Executive Overview, Logical Architecture, Deployment/Infrastructure, Security and Trust Boundaries, Data Flow, CI/CD Flow, and Observability/Operations.
+
+## Page Planning
+
+Before generating the final draw.io XML, create a page plan and write it to `page-plan.md`. The plan should identify what belongs on:
+
+- Executive Overview: the primary flow, ownership zones, trust boundaries, critical outputs, and optional handoffs.
+- Implementation Detail: role stacks, job templates, inventories, variables, controller workspace details, and implementation mechanics.
+- Security and Trust Boundaries: trust zones, secret retrieval, privileged access, sensitive paths, audit, and policy controls.
+- Data and Evidence Flow: collected data, staged evidence, reports, workbooks, queues, databases, SFS, and optional storage.
+- Operations and Follow-Up: monitoring, logs, health checks, runbooks, assumptions, unknowns, limits, and follow-up diagrams.
+
+Use `page-plan.md` as a quality gate: if Page 1 includes content that belongs on a detail page, simplify Page 1 before final delivery.
+
+## Executive Readability Rules
+
+For Page 1 or any executive architecture review, readability wins over completeness:
+
+- Keep Page 1 understandable in about 30 seconds. Show the main architecture path, ownership zones, trust boundaries, and critical outputs; move variable lists, role internals, host inventories, and long role-level detail to later pages or Markdown artifacts.
+- Use short numbered edge labels on busy diagrams. Put the full flow descriptions in a legend or callout instead of writing long labels over arrows.
+- Prefer a single clean flow direction. For automation/reporting diagrams, use: Source Control -> Tower/AWX or controller -> Customer Targets -> Controller Workspace/Data Objects -> Reports/SFS -> Consumers.
+- Size nodes for reading first. Use fewer words per shape, larger nodes, more whitespace, and one clear concept per shape. Turn dense role lists into compact stacks, matrices, or follow-up pages.
+- Render data objects as data objects. Examples: collected health data, staged results, Excel workbooks, reports, queues, databases, vaults, and object storage should not look like generic process boxes.
+- Put consumers downstream and outside the report-generation path. Optional destinations such as SFS or object storage should sit below or far right with dashed optional routing.
+- Show trust boundaries on Page 1 when security ownership matters. Use dashed red boundaries for customer, external, privileged, or sensitive zones.
+- Use light fills with dark text even when diagrams.net is in dark mode. Avoid heavy dark boxes and tiny white text in production diagrams.
+- Include a compact security callout when applicable: no secrets in source control or reports; generated reports may contain sensitive configuration evidence.
+
+Use these default line semantics on Page 1:
+
+- Blue or purple solid: control flow, orchestration, sync, and job launch.
+- Green solid: target collection, health checks, and inventory/evidence retrieval.
+- Yellow or amber solid: evidence, report, workbook, and consumer flow.
+- Gray dashed: optional external storage or optional handoff.
+- Red dashed: secrets, credentials, privileged access, or sensitive security paths.
 
 ## Audience Modes
 
@@ -149,6 +184,8 @@ Support at least these categories:
 
 If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable.
 
+Use icon-like visual cues for common enterprise review nodes: repository/folder for source control, controller/process for Tower/AWX, server for Linux/Windows targets, cylinder for databases, queue for RabbitMQ/Kafka, note/document for Excel workbooks and reports, vault/lock for secret stores, cloud/object for SFS or object storage, and actor/user shapes for consumers.
+
 ## Draw.io XML Rules
 
 The `.drawio` file must:
@@ -176,6 +213,9 @@ Before final response, validate:
 - Edge source/target existence.
 - Geometry presence.
 - Important labels are non-empty.
+- Busy edge labels are shortened or numbered with full descriptions moved to a legend.
+- Page 1 has enough spacing for nodes, labels, and routed arrows to avoid overlaps.
+- `page-plan.md` exists and separates executive content from detail, security, data/evidence, and operations content.
 - No raw secrets.
 - Output files exist.
 - Diagram summary exists.
@@ -230,6 +270,7 @@ The helper writes:
 
 - `diagram.drawio`
 - `diagram-summary.md`
+- `page-plan.md`
 - `assumptions.md`
 - `adversarial-review.md`
 - `quality-checklist.md`
@@ -273,11 +314,12 @@ Return:
 
 1. What was generated.
 2. Output file paths.
-3. How validation was performed.
-4. Assumptions and unknowns.
-5. Adversarial review summary.
-6. Known limitations.
-7. Suggested follow-up diagrams.
+3. Page-plan summary.
+4. How validation was performed.
+5. Assumptions and unknowns.
+6. Adversarial review summary.
+7. Known limitations.
+8. Suggested follow-up diagrams.
 
 Be blunt about limitations. Do not claim unsupported parsing, official research, rendering, or icon licensing work happened unless it actually happened.
 
