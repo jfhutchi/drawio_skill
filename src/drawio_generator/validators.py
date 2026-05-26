@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 from .diagram_model import Diagram
+from .icon_registry import get_icon_style
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +86,49 @@ def validate_model(diagram: Diagram) -> list[ValidationIssue]:
         if contains_secret(" ".join(filter(None, [edge.label, edge.protocol or "", edge.security_control or "", str(edge.metadata)]))):
             issues.append(ValidationIssue("error", "Edge contains an unredacted secret", edge.id))
 
+    issues.extend(validate_vendor_shape_accuracy(diagram))
+    return issues
+
+
+_VENDOR_HINT_TERMS: tuple[tuple[str, str], ...] = (
+    ("azure", "azure"),
+    ("aws", "aws"),
+    ("amazon", "aws"),
+    ("google cloud", "gcp"),
+    ("gcp", "gcp"),
+    ("kubernetes", "kubernetes"),
+)
+
+
+def validate_vendor_shape_accuracy(diagram: Diagram) -> list[ValidationIssue]:
+    """Warn when a node's label clearly names a vendor service but resolves to
+    a generic fallback shape.
+
+    This surfaces coverage gaps in the built-in vendor stencil registry to
+    reviewers before delivery, so they can either rename the node, add a new
+    alias, or accept the gap consciously. Only nodes whose label or icon
+    contains an unambiguous vendor hint are checked; generic shapes for
+    non-vendor nodes are left alone.
+    """
+
+    issues: list[ValidationIssue] = []
+    for node in diagram.nodes:
+        text = " ".join(filter(None, [node.label, node.icon or "", node.technology or ""])).lower()
+        vendor = next((vendor for hint, vendor in _VENDOR_HINT_TERMS if hint in text), None)
+        if vendor is None:
+            continue
+        style = get_icon_style(node.node_type, node.icon, node.label)
+        if style.category == "fallback":
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    (
+                        f"Node looks like a {vendor.upper()} service but resolved to a generic fallback shape. "
+                        "Add an alias in builtin_vendor_shapes.py or rename the label to a recognized service."
+                    ),
+                    node.id,
+                )
+            )
     return issues
 
 

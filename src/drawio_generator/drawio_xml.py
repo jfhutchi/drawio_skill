@@ -225,7 +225,7 @@ def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
 
 
 def _add_node(root: ET.Element, node: Node) -> None:
-    style = get_icon_style(node.node_type, node.icon).drawio_style
+    style = get_icon_style(node.node_type, node.icon, node.label).drawio_style
     if node.risk_level and node.risk_level.lower() in {"high", "critical"}:
         style += "strokeColor=#b85450;strokeWidth=2;"
     cell = ET.SubElement(
