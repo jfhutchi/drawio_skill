@@ -1,6 +1,6 @@
 # Icon Registry
 
-The helper uses diagrams.net built-in styles and safe fallback shapes. It does not embed proprietary vendor icons. Common Azure and AWS service names are vendor-aware aliases, but they still resolve to safe built-in fallback shapes unless a licensed local official icon pack is explicitly integrated and documented. Agents may use official vendor icon packs only when licensing permits it and the resulting draw.io file remains portable.
+The helper uses real diagrams.net built-in vendor stencils by default for recognized cloud and platform service names: Azure (`mxgraph.azure.*`), AWS (`mxgraph.aws4.*`), GCP (`mxgraph.gcp2.*`), and Kubernetes (`mxgraph.kubernetes.*`). These stencil libraries ship with diagrams.net itself — no proprietary icon pack or manifest is required. Unrecognized labels fall back to vendor-colored generic shapes. A licensed third-party icon pack (see "Local Licensed Vendor Icon Packs" below) still takes precedence when configured.
 
 ## Built-In Categories
 
@@ -13,17 +13,23 @@ The helper uses diagrams.net built-in styles and safe fallback shapes. It does n
 - DevOps: Terraform, Ansible, build/deploy processes.
 - Operations: monitoring, logging, dashboard.
 
-## Vendor-Aware Aliases
+## Built-In Vendor Stencils (default)
 
-Azure aliases include Azure Kubernetes Service/AKS, Azure Front Door, Application Gateway, Key Vault, Azure Database for PostgreSQL, Azure SQL, Azure Monitor, and Log Analytics. AWS aliases include Lambda, S3, DynamoDB, RDS, CloudFront, WAF, IAM, and API Gateway. These aliases improve shape choice and licensing metadata; they do not mean official cloud icons were embedded.
+The helper resolves recognized service names to the bundled diagrams.net vendor stencil libraries:
+
+- **Azure** (`mxgraph.azure.*`): AKS, App Service, Functions, Container Apps, VM, Front Door, Application Gateway, Load Balancer, Traffic Manager, CDN, DNS, VNet, Firewall, Bastion, ExpressRoute, Private Link, Key Vault, Entra ID/AAD, Managed Identity, Sentinel, Defender, Monitor, Log Analytics, Application Insights, Cosmos DB, Azure SQL, Synapse, Service Bus, Event Hubs, Event Grid, API Management, Logic Apps, Storage Accounts, Backup, Data Factory, Databricks, Cognitive Services, ML, and more.
+- **AWS** (`mxgraph.aws4.*` via `resourceIcon`): Lambda, EC2, ECS, EKS, Fargate, ECR, S3, EBS, EFS, FSx, RDS, Aurora, DynamoDB, ElastiCache, Redshift, DocumentDB, Neptune, CloudFront, Route 53, API Gateway, ELB/ALB/NLB, VPC, Transit Gateway, Direct Connect, IAM, KMS, Secrets Manager, ACM, WAF, Shield, GuardDuty, Security Hub, Cognito, Inspector, Macie, SQS, SNS, EventBridge, Step Functions, MQ, Kinesis, MSK, Athena, EMR, Glue, QuickSight, CloudWatch, CloudTrail, Config, Systems Manager, X-Ray, CloudFormation, Organizations, SageMaker, Bedrock, Rekognition, Comprehend, and more. Category-specific fill colors are applied automatically (compute=orange, storage=green, database=purple, network=violet, security=red, integration/management=pink, AI=teal).
+- **GCP** (`mxgraph.gcp2.*`): GKE, Compute Engine, Cloud Functions, Cloud Run, App Engine, Cloud Storage, Filestore, Cloud SQL, Cloud Spanner, Bigtable, Firestore, BigQuery, Memorystore, Cloud Load Balancing, Cloud CDN, Cloud DNS, Cloud Armor, Cloud VPN, Interconnect, VPC, IAM, KMS, Secret Manager, Pub/Sub, Cloud Tasks, Cloud Scheduler, Cloud Monitoring/Logging/Trace, Vertex AI, and more.
+- **Kubernetes** (`mxgraph.kubernetes.*` via `prIcon`): Pod, Deployment, ReplicaSet, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Endpoint, NetworkPolicy, ConfigMap, Secret, PV, PVC, StorageClass, Namespace, ServiceAccount, Role, ClusterRole, Node, API server, etcd, kubelet, scheduler, controller manager.
 
 ## Fallback Rule
 
-If a precise icon is unavailable, choose the closest safe built-in shape with a clear label. Do not fail diagram generation because a branded icon is unavailable.
+If a label doesn't match a recognized vendor service name, the helper falls back to a vendor-tagged generic shape (rounded rectangle in vendor color). The `validate_vendor_shape_accuracy` validator emits a warning when a node label clearly names a vendor but resolves to a generic shape — that's the signal to add a new alias rather than accept the gap.
 
 ## Adding Mappings
 
-Add aliases and style definitions in `src/drawio_generator/icon_registry.py`. Keep styles simple, readable, and compatible with diagrams.net XML. Prefer muted enterprise colors and avoid decorative icon choices that make the diagram harder to scan.
+- **Add a new vendor service**: edit `src/drawio_generator/builtin_vendor_shapes.py` and add an entry to `_AZURE_SHAPES`, `_AWS_SHAPES`, `_GCP_SHAPES`, or `_K8S_SHAPES`. Use the exact mxgraph stencil suffix (e.g. `cosmos_db` for `mxgraph.azure.cosmos_db`).
+- **Add a generic shape**: edit `src/drawio_generator/icon_registry.py` and add to `STYLE_REGISTRY`. Keep styles simple, readable, and compatible with diagrams.net XML. Prefer muted enterprise colors for non-vendor shapes; vendor brand colors are applied by the built-in vendor stencil resolver.
 
 ## Local Licensed Vendor Icon Packs
 

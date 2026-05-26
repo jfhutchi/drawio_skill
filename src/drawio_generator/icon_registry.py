@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
+from . import builtin_vendor_shapes
 from .icon_packs import IconPack, discover_icon_packs
 
 
@@ -122,14 +123,82 @@ ALIASES: dict[str, str] = {
 }
 
 VENDOR_TERMS: dict[str, tuple[str, ...]] = {
-    "azure": ("azure", "aks", "key vault", "front door", "traffic manager", "application gateway"),
-    "aws": ("aws", "amazon", "cloudfront", "dynamodb", "lambda", "s3"),
-    "gcp": ("google cloud", "gcp"),
+    "azure": (
+        "azure",
+        "aks",
+        "key vault",
+        "front door",
+        "traffic manager",
+        "application gateway",
+        "entra",
+        "cosmos db",
+        "service bus",
+        "event hubs",
+        "event grid",
+        "log analytics",
+        "application insights",
+        "sentinel",
+        "defender for cloud",
+    ),
+    "aws": (
+        "aws",
+        "amazon",
+        "cloudfront",
+        "dynamodb",
+        "lambda",
+        "s3",
+        "route 53",
+        "eks",
+        "ecs",
+        "fargate",
+        "sqs",
+        "sns",
+        "eventbridge",
+        "cloudwatch",
+        "guardduty",
+    ),
+    "gcp": (
+        "google cloud",
+        "gcp",
+        "gke",
+        "bigquery",
+        "vertex ai",
+        "cloud run",
+        "cloud functions",
+        "cloud storage",
+        "pub/sub",
+        "pub sub",
+        "cloud spanner",
+        "firestore",
+    ),
+    "kubernetes": (
+        "kubernetes pod",
+        "k8s pod",
+        "kubernetes deployment",
+        "kubernetes service",
+        "kubernetes ingress",
+        "kubernetes configmap",
+        "kubernetes secret",
+        "kubernetes namespace",
+        "kubernetes pv",
+        "kubernetes pvc",
+        "kubernetes statefulset",
+        "kubernetes daemonset",
+        "kubernetes job",
+        "kubernetes cronjob",
+        "kubernetes node",
+    ),
 }
 
 
 def _vendor_for(label: str) -> str | None:
     lowered = label.lower()
+    # Exact match against any built-in vendor shape map is the strongest
+    # signal -- service names like "Google Kubernetes Engine" do not share an
+    # obvious vendor token with the substring-based fallback below.
+    for vendor in ("azure", "aws", "gcp", "kubernetes"):
+        if builtin_vendor_shapes.lookup(vendor, lowered) is not None:
+            return vendor
     for vendor, terms in VENDOR_TERMS.items():
         if any(term in lowered for term in terms):
             return vendor
@@ -184,17 +253,69 @@ def _official_for(label: str, vendor: str | None) -> IconStyle | None:
     )
 
 
-def get_icon_style(node_type: str | None, icon: str | None = None) -> IconStyle:
+def _builtin_vendor_style(label: str, vendor: str | None) -> IconStyle | None:
+    """Resolve a label to a diagrams.net built-in vendor stencil.
+
+    Built-in vendor shapes (``mxgraph.azure.*``, ``mxgraph.aws4.*``,
+    ``mxgraph.gcp2.*``, ``mxgraph.kubernetes.*``) ship with diagrams.net and
+    are free to use in any ``.drawio`` file. They are used by default for
+    recognized vendor service names so the helper produces real vendor icons
+    instead of generic colored rectangles. A licensed third-party icon pack
+    still takes precedence when one is configured.
+    """
+
+    if vendor is None:
+        return None
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in (label, ALIASES.get(label)):
+        if not candidate:
+            continue
+        if candidate not in seen:
+            seen.add(candidate)
+            candidates.append(candidate)
+    for candidate in candidates:
+        match = builtin_vendor_shapes.lookup(vendor, candidate)
+        if match is None:
+            continue
+        return IconStyle(
+            category=match.category,
+            drawio_style=match.drawio_style,
+            fallback_label=match.label,
+            vendor=match.vendor,
+            official=False,
+            license_notice=(
+                f"diagrams.net built-in {vendor} stencil "
+                f"(no proprietary icon pack required)"
+            ),
+        )
+    return None
+
+
+def get_icon_style(
+    node_type: str | None,
+    icon: str | None = None,
+    label: str | None = None,
+) -> IconStyle:
     """Return the closest available draw.io style for a node.
 
-    A locally licensed vendor icon pack is used when present. Otherwise the
-    vendor-aware aliases map to safe diagrams.net built-in fallback shapes and
-    the returned metadata records the vendor and explicitly says the style is
-    not an official vendor icon.
+    Resolution order, tried for each non-empty candidate in ``(icon, label,
+    node_type)``:
+
+    1. Locally licensed vendor icon pack (manifest in ``stencils/<vendor>/``).
+    2. Built-in diagrams.net vendor stencils (``mxgraph.azure``, ``aws4``,
+       ``gcp2``, ``kubernetes``) for recognized service names.
+    3. Generic registry entry via vendor-aware alias.
+    4. Vendor-tagged generic fallback (rounded rectangle).
+
+    ``label`` is tried between ``icon`` and ``node_type`` so a specific service
+    name like "Azure Kubernetes Service" wins over a generic
+    ``node_type="kubernetes"`` that would otherwise downgrade the node to a
+    plain generic shape.
     """
 
     fallback_vendor: str | None = None
-    for candidate in (icon, node_type):
+    for candidate in (icon, label, node_type):
         if not candidate:
             continue
         raw_key = candidate.strip().lower()
@@ -207,6 +328,9 @@ def get_icon_style(node_type: str | None, icon: str | None = None) -> IconStyle:
         official_alias = _official_for(key, vendor)
         if official_alias is not None:
             return official_alias
+        builtin = _builtin_vendor_style(raw_key, vendor)
+        if builtin is not None:
+            return builtin
         if key in STYLE_REGISTRY:
             return _with_vendor(STYLE_REGISTRY[key], vendor)
     if fallback_vendor:

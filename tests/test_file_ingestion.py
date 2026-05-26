@@ -105,5 +105,75 @@ class FileIngestionTests(unittest.TestCase):
         self.assertNotIn(("azure-database-for-postgresql", "grafana"), pairs)
 
 
+    def test_auto_derives_vendor_services_from_shape_registry(self):
+        # Services NOT in _CORE_KNOWN_COMPONENTS but present in
+        # builtin_vendor_shapes should still get extracted.
+        text = (
+            "Architecture uses Azure Synapse Analytics for warehousing, "
+            "AWS Glue for ETL, Google Vertex AI for ML serving, and "
+            "Google Firestore for client sync."
+        )
+
+        result = extract_components_from_text("multi.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("Azure Synapse Analytics", labels)
+        self.assertIn("AWS Glue", labels)
+        self.assertIn("Google Vertex AI", labels)
+        self.assertIn("Google Firestore", labels)
+
+    def test_fuzzy_matches_variant_phrasings(self):
+        text = (
+            "Lambdas process events from EventBridge buses and write to S3 buckets. "
+            "EKS clusters host pods that read from DynamoDB tables. "
+            "Function apps push messages to Service Bus queues. "
+            "k8s pods read ConfigMaps and persistent volume claims. "
+            "BigQuery datasets feed Vertex AI endpoints. "
+            "Cosmos DB containers store session state."
+        )
+
+        result = extract_components_from_text("variant.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("AWS Lambda", labels)
+        self.assertIn("Amazon EventBridge", labels)
+        self.assertIn("Amazon S3", labels)
+        self.assertIn("Amazon EKS", labels)
+        self.assertIn("Kubernetes Pod", labels)
+        self.assertIn("Amazon DynamoDB", labels)
+        self.assertIn("Azure Functions", labels)
+        self.assertIn("Azure Service Bus", labels)
+        self.assertIn("Kubernetes ConfigMap", labels)
+        # The auto-derived label uses the PVC acronym for compactness;
+        # accept either form so the test reflects what users see.
+        self.assertTrue(
+            "Kubernetes PVC" in labels or "Kubernetes Persistent Volume Claim" in labels,
+            labels,
+        )
+        self.assertIn("Google BigQuery", labels)
+        self.assertIn("Google Vertex AI", labels)
+        self.assertIn("Azure Cosmos DB", labels)
+
+    def test_preserves_input_casing_for_well_formed_labels(self):
+        # Input has "AKS" -> label stays "AKS", not canonicalized away.
+        text = "We deploy services to AKS in production."
+
+        result = extract_components_from_text("notes.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("AKS", labels)
+
+    def test_application_gateway_waf_does_not_also_extract_plain_gateway(self):
+        text = "Inbound traffic flows through Application Gateway WAF only."
+
+        result = extract_components_from_text("notes.md", text)
+        labels = {component.label for component in result.components}
+
+        self.assertIn("Application Gateway WAF", labels)
+        # The shorter "application gateway" needle should not produce a
+        # duplicate vendor node when it overlaps a longer match.
+        self.assertNotIn("Azure Application Gateway", labels)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from drawio_generator.adversarial_review import improve_diagram, review_diagram
 from drawio_generator.diagram_model import Diagram, Edge, Node
-from drawio_generator.validators import contains_secret, redact_sensitive_text
+from drawio_generator.validators import (
+    contains_secret,
+    redact_sensitive_text,
+    validate_model,
+    validate_vendor_shape_accuracy,
+)
 
 
 class SecurityAndReviewTests(unittest.TestCase):
@@ -47,6 +52,41 @@ class SecurityAndReviewTests(unittest.TestCase):
         self.assertGreater(len(improved.legends), len(diagram.legends))
         self.assertTrue(improved.assumptions)
         self.assertTrue(improved.quality_checks)
+
+
+    def test_vendor_shape_accuracy_flags_unrecognized_vendor_service(self):
+        diagram = Diagram(
+            title="Test",
+            nodes=[
+                Node(id="known", label="Azure Key Vault"),
+                Node(id="generic", label="Azure Imaginary Service"),
+                Node(id="aws_known", label="Amazon S3"),
+                Node(id="aws_generic", label="Amazon Imaginary"),
+                Node(id="non_vendor", label="Custom Service"),
+            ],
+        )
+
+        issues = validate_vendor_shape_accuracy(diagram)
+        flagged_ids = sorted(issue.item_id for issue in issues if issue.item_id)
+
+        self.assertEqual(["aws_generic", "generic"], flagged_ids)
+        for issue in issues:
+            self.assertEqual("warning", issue.severity)
+            self.assertIn("generic fallback", issue.message.lower())
+
+    def test_validate_model_includes_vendor_shape_accuracy_warnings(self):
+        diagram = Diagram(
+            title="Test",
+            nodes=[Node(id="bogus", label="Azure Bogus Service")],
+        )
+
+        issues = validate_model(diagram)
+        warnings = [issue for issue in issues if issue.severity == "warning"]
+
+        self.assertTrue(
+            any("generic fallback" in issue.message.lower() for issue in warnings),
+            warnings,
+        )
 
 
 if __name__ == "__main__":
