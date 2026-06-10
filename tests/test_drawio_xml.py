@@ -59,6 +59,43 @@ class DrawioXmlTests(unittest.TestCase):
         self.assertIn("Orders &amp; Billing", xml_text)
         self.assertEqual([], validate_drawio_xml(xml_text))
 
+    def test_drawio_values_normalize_newlines_to_html_breaks(self):
+        diagram = Diagram(
+            title="Workflow",
+            subtitle="Executive\nDetail",
+            diagram_type="enterprise",
+            boundaries=[Boundary(id="boundary-prod", label="Production\nZone", boundary_type="environment")],
+            nodes=[
+                Node(id="api", label="API\\nWorker", node_type="api", group="boundary-prod"),
+                Node(id="db", label="Database\r\nPrimary", node_type="database", group="boundary-prod"),
+            ],
+            edges=[
+                Edge(
+                    id="edge-api-db",
+                    source="api",
+                    target="db",
+                    label="query path",
+                    metadata={"display_label": "SQL\\nRead"},
+                )
+            ],
+            legends=[LegendItem(label="Prod", meaning="Live\ncustomer path")],
+            metadata={"page_notes": ["Check logs\\nalerts"]},
+        )
+
+        xml_text = generate_drawio_xml(diagram)
+        root = ET.fromstring(xml_text)
+        cells = {cell.attrib.get("id"): cell for cell in root.findall(".//mxCell")}
+
+        self.assertIn("Executive<br>Detail", cells["__title"].attrib["value"])
+        self.assertEqual("Production<br>Zone", cells["boundary-prod"].attrib["value"])
+        self.assertEqual("API<br>Worker", cells["api"].attrib["value"])
+        self.assertEqual("Database<br>Primary", cells["db"].attrib["value"])
+        self.assertEqual("SQL<br>Read", cells["edge-api-db"].attrib["value"])
+        self.assertIn("Prod: Live<br>customer path", cells["__legend"].attrib["value"])
+        self.assertIn("Check logs<br>alerts", cells["__page_notes"].attrib["value"])
+        self.assertIn("API&lt;br&gt;Worker", xml_text)
+        self.assertEqual([], validate_drawio_xml(xml_text))
+
     def test_enterprise_edges_use_numbered_labels_and_semantic_colors(self):
         diagram = Diagram(
             title="Enterprise Review",
