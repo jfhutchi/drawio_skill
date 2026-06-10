@@ -182,6 +182,22 @@ def _page_name(title: str) -> str:
     return (clean or "Page-1")[:60]
 
 
+def _drawio_value(value: object) -> str:
+    """Normalize cell label text for diagrams.net HTML labels.
+
+    mxCell labels in this generator use ``html=1``. For multi-line text,
+    diagrams.net expects an HTML break in the label value, not raw newline
+    characters or a literal backslash-n token. ElementTree will XML-escape the
+    ``<br>`` marker to ``&lt;br&gt;`` on serialization, which draw.io reads back as
+    an HTML line break when opening the uncompressed XML.
+    """
+
+    text = str(value)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    return "<br>".join(text.split("\n"))
+
+
 def _add_title(root: ET.Element, diagram: Diagram) -> None:
     title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
     cell = ET.SubElement(
@@ -189,7 +205,7 @@ def _add_title(root: ET.Element, diagram: Diagram) -> None:
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__title",
-            "value": title_value,
+            "value": _drawio_value(title_value),
             "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1f2933;",
             "vertex": "1",
             "parent": "1",
@@ -205,7 +221,7 @@ def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
         "mxCell",
         {
             "id": boundary.id,
-            "value": boundary.label,
+            "value": _drawio_value(boundary.label),
             "style": style,
             "vertex": "1",
             "parent": "1",
@@ -233,7 +249,7 @@ def _add_node(root: ET.Element, node: Node) -> None:
         "mxCell",
         {
             "id": node.id,
-            "value": node.label,
+            "value": _drawio_value(node.label),
             "style": style,
             "vertex": "1",
             "parent": "1",
@@ -259,7 +275,7 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
         "mxCell",
         {
             "id": edge.id,
-            "value": _edge_value(edge),
+            "value": _drawio_value(_edge_value(edge)),
             "style": style,
             "edge": "1",
             "parent": "1",
@@ -296,7 +312,7 @@ def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, va
         "mxCell",
         {
             "id": f"{cell_prefix}__badge_{edge.id}",
-            "value": value,
+            "value": _drawio_value(value),
             "style": (
                 "ellipse;whiteSpace=wrap;html=1;aspect=fixed;"
                 f"fillColor={fill};strokeColor=#ffffff;fontColor=#ffffff;fontStyle=1;fontSize=13;"
@@ -318,7 +334,7 @@ def _add_legend(root: ET.Element, legends: list[LegendItem], edges: list[Edge], 
         "mxCell",
         {
             "id": f"{cell_prefix}__legend",
-            "value": value,
+            "value": _drawio_value(value),
             "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;",
             "vertex": "1",
             "parent": "1",
@@ -337,7 +353,7 @@ def _add_page_notes(root: ET.Element, diagram: Diagram, page_height: int) -> Non
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__page_notes",
-            "value": value,
+            "value": _drawio_value(value),
             "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
             "vertex": "1",
             "parent": "1",
