@@ -152,6 +152,9 @@ _SHAPE_MONOGRAMS = {
 }
 
 
+_VENDOR_BRAND_FILLS = {"azure": "#0078D4", "aws": "#FF9900", "gcp": "#4285F4", "kubernetes": "#326CE5"}
+
+
 def _glyph_marker(glyph_style: str, vendor: str | None) -> tuple[str, str]:
     """(fill, monogram) standing in for a stencil the stdlib cannot rasterize.
 
@@ -161,7 +164,10 @@ def _glyph_marker(glyph_style: str, vendor: str | None) -> tuple[str, str]:
     """
 
     fill_match = _GLYPH_FILL_RE.search(glyph_style)
-    fill = fill_match.group(1) if fill_match else "#6c757d"
+    if fill_match is not None:
+        fill = fill_match.group(1)
+    else:
+        fill = _VENDOR_BRAND_FILLS.get(vendor or "", "#6c757d")
     if vendor in _VENDOR_MONOGRAMS:
         return fill, _VENDOR_MONOGRAMS[vendor]
     shape_match = _GLYPH_SHAPE_RE.search(glyph_style)

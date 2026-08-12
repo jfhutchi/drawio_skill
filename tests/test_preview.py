@@ -79,7 +79,8 @@ class PreviewSceneTests(unittest.TestCase):
         # backend card gets none.
         self.assertEqual(1, len(glyphs))
         self.assertEqual(["Az"], monograms)
-        self.assertEqual("#0072C6", glyphs[0].attrib.get("fill"))
+        # azure2 image glyphs carry no fillColor; the marker uses the brand color.
+        self.assertEqual("#0078D4", glyphs[0].attrib.get("fill"))
 
 
 class PreviewWriteTests(unittest.TestCase):

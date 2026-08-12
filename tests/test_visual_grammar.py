@@ -56,7 +56,7 @@ class VisualGrammarTests(unittest.TestCase):
         for glyph in glyphs:
             style = glyph.attrib.get("style", "")
             self.assertIn("aspect=fixed", style, glyph.attrib.get("id"))
-            self.assertIn("shape=", style, glyph.attrib.get("id"))
+            self.assertTrue("shape=" in style or "image=" in style, glyph.attrib.get("id"))
             geometry = glyph.find("mxGeometry")
             self.assertEqual("40", geometry.attrib.get("width"), glyph.attrib.get("id"))
             self.assertEqual("40", geometry.attrib.get("height"), glyph.attrib.get("id"))

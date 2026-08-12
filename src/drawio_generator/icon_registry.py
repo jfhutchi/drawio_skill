@@ -411,14 +411,14 @@ def card_style(category: str, has_glyph: bool) -> str:
 def _glyph_style(resolved_style: str) -> str | None:
     """Turn a resolved shape style into a fixed-size glyph-child style.
 
-    Only styles that reference an actual shape become glyphs; plain colored
-    rectangles carry no extra information beyond the card itself. Stencils are
-    never stretched: the glyph is always emitted at GLYPH_SIZE with
-    aspect=fixed, and label-below positioning is stripped because glyph
+    Only styles that reference an actual shape or image become glyphs; plain
+    colored rectangles carry no extra information beyond the card itself.
+    Stencils are never stretched: the glyph is always emitted at GLYPH_SIZE
+    with aspect=fixed, and label-below positioning is stripped because glyph
     children have no label.
     """
 
-    if "shape=" not in resolved_style:
+    if "shape=" not in resolved_style and "image=" not in resolved_style:
         return None
     style = resolved_style.replace("verticalLabelPosition=bottom;", "").replace("verticalAlign=top;", "")
     if not style.endswith(";"):
