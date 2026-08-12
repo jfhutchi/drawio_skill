@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +14,16 @@ class RendererStatus:
     available: bool
     command: str | None = None
     note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RenderExport:
+    """Outcome of one real draw.io page export attempt."""
+
+    page_number: int
+    path: str
+    ok: bool
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +66,54 @@ def detect_renderer() -> RendererStatus:
         if path:
             return RendererStatus(True, path, "Renderer available; screenshot export can be added by the caller.")
     return RendererStatus(False, None, "Renderer unavailable; performed static XML geometry QA only.")
+
+
+def export_pages_with_renderer(
+    renderer: RendererStatus,
+    xml_path: Path,
+    output_dir: Path,
+    page_count: int,
+) -> list[RenderExport]:
+    """Export each page to PNG with a detected draw.io binary.
+
+    Tries ``xvfb-run -a`` first when available (headless Linux), then a plain
+    invocation. Reports failures honestly instead of pretending an export
+    happened.
+    """
+
+    if not renderer.available or not renderer.command:
+        return []
+    xvfb = shutil.which("xvfb-run")
+    exports: list[RenderExport] = []
+    for page_index in range(page_count):
+        out_path = Path(output_dir) / f"render-page-{page_index + 1}.png"
+        base = [
+            renderer.command,
+            "-x",
+            "-f",
+            "png",
+            "--page-index",
+            str(page_index),
+            "-o",
+            str(out_path),
+            str(xml_path),
+        ]
+        attempts = ([[xvfb, "-a", *base]] if xvfb else []) + [base]
+        ok = False
+        message = "no export attempt ran"
+        for command in attempts:
+            try:
+                completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
+            except (OSError, subprocess.SubprocessError) as exc:
+                message = f"{command[0]} failed to run: {exc}"
+                continue
+            if completed.returncode == 0 and out_path.exists():
+                ok = True
+                message = "exported"
+                break
+            message = (completed.stderr or completed.stdout or "").strip()[:200] or f"exit code {completed.returncode}"
+        exports.append(RenderExport(page_index + 1, str(out_path), ok, message))
+    return exports
 
 
 def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
@@ -126,16 +186,45 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
     return issues
 
 
-def render_visual_qa(issues: list[VisualQaIssue], renderer: RendererStatus | None = None) -> str:
+def qa_error_count(issues: list[VisualQaIssue], xml_error_count: int = 0) -> int:
+    """Total error-severity findings that must fail a --validate run."""
+
+    return xml_error_count + sum(1 for issue in issues if issue.severity == "error")
+
+
+def result_line(error_count: int) -> str:
+    return f"RESULT: FAIL ({error_count} errors)" if error_count else "RESULT: PASS"
+
+
+def render_visual_qa(
+    issues: list[VisualQaIssue],
+    renderer: RendererStatus | None = None,
+    *,
+    xml_error_count: int = 0,
+    exports: list[RenderExport] | None = None,
+    preview_paths: list[Path] | None = None,
+) -> str:
     renderer = renderer or detect_renderer()
-    lines = ["# Render and Visual QA", ""]
+    lines = [result_line(qa_error_count(issues, xml_error_count)), "", "# Render and Visual QA", ""]
     if renderer.available:
         lines.append(f"- Renderer available: {renderer.command}")
-        lines.append("- Screenshot captured: no; CLI currently records availability and static checks only.")
+        if exports:
+            for export in exports:
+                if export.ok:
+                    lines.append(f"- Page {export.page_number} exported: {export.path}")
+                else:
+                    lines.append(f"- Page {export.page_number} export FAILED: {export.message}")
+        else:
+            lines.append("- Screenshot captured: no; renderer export was not attempted on this run.")
     else:
         lines.append(f"- Renderer unavailable: {renderer.note}")
+    if preview_paths:
+        lines.extend(["", "## Model Previews"])
+        lines.extend(f"- {path}" for path in preview_paths)
     lines.extend(["", "## Static Checks"])
-    if not issues:
+    if xml_error_count:
+        lines.append(f"- [error] draw.io XML validation reported {xml_error_count} error(s); see stderr/quality-checklist.")
+    if not issues and not xml_error_count:
         lines.append("- [x] No static overlap, off-canvas, unreadable text, long edge label, or missing badge warnings found.")
     else:
         for issue in issues:

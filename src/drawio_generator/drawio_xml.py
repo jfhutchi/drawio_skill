@@ -3,12 +3,88 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 from typing import Any
 
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
 from .icon_registry import get_icon_style
 from .layout_engine import apply_layout
+
+
+@dataclass(frozen=True, slots=True)
+class FurnitureBox:
+    """Geometry and text for one page-furniture element (title, legend, notes)."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PageFurniture:
+    title: FurnitureBox
+    legend: FurnitureBox | None
+    notes: FurnitureBox | None
+
+
+def compute_furniture(diagram: Diagram) -> PageFurniture:
+    """Compute title, legend, and page-notes geometry for a laid-out page.
+
+    Single source of truth shared by the XML emitter and the preview renderer.
+    """
+
+    _, page_height = _page_size(diagram)
+    title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
+    title = FurnitureBox(40, 30, 850, 60, title_value)
+
+    legend: FurnitureBox | None = None
+    rows = [
+        "Legend",
+        *[f"{item.label}: {item.meaning}" for item in diagram.legends],
+        *_flow_legend_rows(diagram.edges),
+    ]
+    if len(rows) > 1:
+        legend = FurnitureBox(900, 30, 320, 45 + len(rows) * 24, "\n".join(rows))
+
+    notes: FurnitureBox | None = None
+    page_notes = diagram.metadata.get("page_notes")
+    if isinstance(page_notes, list) and page_notes:
+        value = "Page notes\n" + "\n".join(str(note) for note in page_notes)
+        notes = FurnitureBox(40, max(120, page_height - 105), 760, 45 + len(page_notes) * 22, value)
+
+    return PageFurniture(title, legend, notes)
+
+
+def build_page_diagrams(diagram: Diagram, page_plan: Any) -> list[tuple[str, Diagram]]:
+    """Return (page_name, laid-out id-prefixed Diagram) pairs for each emitted page.
+
+    This is the same page sequence ``generate_multipage_drawio_xml`` emits, so
+    the preview renderer and any model-level QA see exactly what the XML will
+    contain. Falls back to a single laid-out page when the plan is empty.
+    """
+
+    pages = list(getattr(page_plan, "pages", []))
+    built: list[tuple[str, Diagram]] = []
+    emitted = 0
+    for plan_page in pages:
+        page_diagram = _diagram_for_plan_page(diagram, plan_page)
+        if emitted > 0 and not page_diagram.nodes and not page_diagram.edges:
+            continue
+        emitted += 1
+        laid_out = apply_layout(page_diagram)
+        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
+        _renumber_edges_per_page(laid_out)
+        prefix = f"p{emitted}_"
+        prefixed = _prefix_diagram_ids(laid_out, prefix)
+        built.append((_page_name(str(getattr(plan_page, "title", f"Page {emitted}"))), prefixed))
+    if not built:
+        laid_out = apply_layout(diagram)
+        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
+        built.append((_page_name(diagram.title), laid_out))
+    return built
 
 
 def generate_drawio_xml(diagram: Diagram) -> str:
@@ -20,34 +96,27 @@ def generate_drawio_xml(diagram: Diagram) -> str:
     return ET.tostring(mxfile, encoding="unicode", short_empty_elements=True)
 
 
-def generate_multipage_drawio_xml(diagram: Diagram, page_plan: Any) -> str:
+def generate_multipage_drawio_xml(
+    diagram: Diagram,
+    page_plan: Any,
+    pages: list[tuple[str, Diagram]] | None = None,
+) -> str:
     """Generate uncompressed multi-page draw.io XML from a page plan.
 
     Page 1 is the executive architecture view. Later pages are filtered by
     the page-plan node and edge lists so details, security, and evidence flows
     do not overload the executive page. Cell IDs are page-prefixed to keep
     cross-page XML validation deterministic while each page remains readable.
+
+    ``pages`` may carry pre-built output from :func:`build_page_diagrams` to
+    avoid laying the model out twice when the caller also renders previews.
     """
 
-    pages = list(getattr(page_plan, "pages", []))
-    if not pages:
-        return generate_drawio_xml(diagram)
-
+    if pages is None:
+        pages = build_page_diagrams(diagram, page_plan)
     mxfile = ET.Element("mxfile", {"host": "app.diagrams.net", "agent": "enterprise-drawio-diagrammer"})
-    emitted = 0
-    for index, plan_page in enumerate(pages, start=1):
-        page_diagram = _diagram_for_plan_page(diagram, plan_page)
-        if emitted > 0 and not page_diagram.nodes and not page_diagram.edges:
-            continue
-        emitted += 1
-        laid_out = apply_layout(page_diagram)
-        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
-        _renumber_edges_per_page(laid_out)
-        prefix = f"p{emitted}_"
-        prefixed = _prefix_diagram_ids(laid_out, prefix)
-        _add_diagram_page(mxfile, prefixed, _page_name(str(getattr(plan_page, "title", f"Page {emitted}"))))
-    if emitted == 0:
-        return generate_drawio_xml(diagram)
+    for page_name, page_diagram in pages:
+        _add_diagram_page(mxfile, page_diagram, page_name)
     ET.indent(mxfile, space="  ")
     return ET.tostring(mxfile, encoding="unicode", short_empty_elements=True)
 
@@ -88,17 +157,18 @@ def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> N
     ET.SubElement(root, "mxCell", {"id": "0"})
     ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
 
-    _add_title(root, laid_out)
+    furniture = compute_furniture(laid_out)
+    _add_title(root, laid_out, furniture.title)
     for boundary in laid_out.boundaries:
         _add_boundary(root, boundary)
     for node in laid_out.nodes:
         _add_node(root, node)
-    if laid_out.legends or _flow_legend_rows(laid_out.edges):
-        _add_legend(root, laid_out.legends, laid_out.edges, laid_out)
+    if furniture.legend is not None:
+        _add_legend(root, laid_out, furniture.legend)
     for edge in laid_out.edges:
         _add_edge(root, edge)
     _add_flow_badges(root, laid_out)
-    _add_page_notes(root, laid_out, page_height)
+    _add_page_notes(root, laid_out, furniture.notes)
 
 
 def _diagram_for_plan_page(diagram: Diagram, plan_page: Any) -> Diagram:
@@ -198,20 +268,19 @@ def _drawio_value(value: object) -> str:
     return "<br>".join(text.split("\n"))
 
 
-def _add_title(root: ET.Element, diagram: Diagram) -> None:
-    title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
+def _add_title(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__title",
-            "value": _drawio_value(title_value),
+            "value": _drawio_value(box.text),
             "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1f2933;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "40", "y": "30", "width": "850", "height": "60", "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
 def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
@@ -325,41 +394,37 @@ def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, va
     ET.SubElement(cell, "mxGeometry", {"x": str(x), "y": str(y), "width": str(size), "height": str(size), "as": "geometry"})
 
 
-def _add_legend(root: ET.Element, legends: list[LegendItem], edges: list[Edge], diagram: Diagram | None = None) -> None:
-    rows = ["Legend", *[f"{item.label}: {item.meaning}" for item in legends], *_flow_legend_rows(edges)]
-    value = "\n".join(rows)
-    cell_prefix = "" if diagram is None else str(diagram.metadata.get("cell_prefix", ""))
+def _add_legend(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
+    cell_prefix = str(diagram.metadata.get("cell_prefix", ""))
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{cell_prefix}__legend",
-            "value": _drawio_value(value),
+            "value": _drawio_value(box.text),
             "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "900", "y": "30", "width": "320", "height": str(45 + len(rows) * 24), "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
-def _add_page_notes(root: ET.Element, diagram: Diagram, page_height: int) -> None:
-    notes = diagram.metadata.get("page_notes")
-    if not isinstance(notes, list) or not notes:
+def _add_page_notes(root: ET.Element, diagram: Diagram, box: FurnitureBox | None) -> None:
+    if box is None:
         return
-    value = "Page notes\n" + "\n".join(str(note) for note in notes)
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__page_notes",
-            "value": _drawio_value(value),
+            "value": _drawio_value(box.text),
             "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "40", "y": str(max(120, page_height - 105)), "width": "760", "height": str(45 + len(notes) * 22), "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
 

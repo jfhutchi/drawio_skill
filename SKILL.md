@@ -31,9 +31,12 @@ Follow this sequence for every diagram request:
 14. Generate uncompressed draw.io XML.
 15. Validate XML and model references.
 16. Run static visual QA and renderer availability detection; write `render-qa.md`.
-17. Check visual quality and output files.
-18. Produce final files and a concise explanation.
-19. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+17. Render the model previews (`preview-page-<n>.svg`, plus `.png` when Pillow is installed) and **view the page-1 preview image**. Do not skip this step: the preview shows what the layout engine actually planned.
+18. If `render-qa.md` opens with `RESULT: FAIL`, fix the model or input and re-render. Repeat render → view → fix until it opens with `RESULT: PASS`.
+19. Produce final files and a concise explanation.
+20. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+
+**Never report a diagram as complete while `render-qa.md` says `RESULT: FAIL`.** The `--validate` flag exits 1 on any error-severity visual QA finding or XML validation error; artifacts are still written so you can inspect and fix them.
 
 Do not generate raw draw.io XML directly from unstructured prose. Always create or reason through the intermediate model first.
 
@@ -288,13 +291,14 @@ The helper writes:
 - `diagram-summary.md`
 - `page-plan.md`
 - `visual-guide.md`
-- `render-qa.md`
+- `render-qa.md` — opens with `RESULT: PASS` or `RESULT: FAIL (<n> errors)`
+- `preview-page-<n>.svg` — model-faithful preview of every page (plus `.png` when Pillow or matplotlib is importable; install with `pip install -e ".[preview]"`)
 - `assumptions.md`
 - `adversarial-review.md`
 - `quality-checklist.md`
 - `research-summary.md`
 
-SVG/PNG export is optional and depends on external diagrams.net rendering tools.
+With `--validate`, the exit code is 1 whenever visual QA finds an error-severity issue or the XML validator reports errors; all artifacts are still written. When a local draw.io binary is detected, the helper additionally attempts a real PNG export per page (`render-page-<n>.png`) and records success or failure honestly in `render-qa.md`.
 
 ## Standalone Validation Script
 

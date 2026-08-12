@@ -7,15 +7,23 @@ import re
 import sys
 from pathlib import Path
 
+from . import preview
 from .adversarial_review import improve_diagram, render_adversarial_review, review_diagram
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .drawio_xml import generate_multipage_drawio_xml
+from .drawio_xml import build_page_diagrams, generate_multipage_drawio_xml
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
 from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
 from .visual_patterns import recommend_visual_pattern, render_visual_guide
-from .visual_qa import analyze_drawio_xml, detect_renderer, render_visual_qa
+from .visual_qa import (
+    analyze_drawio_xml,
+    detect_renderer,
+    export_pages_with_renderer,
+    qa_error_count,
+    render_visual_qa,
+    result_line,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,20 +51,31 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model validation error: {issue.message}", file=sys.stderr)
         return 2
 
-    drawio_xml = generate_multipage_drawio_xml(improved, page_plan)
+    pages = build_page_diagrams(improved, page_plan)
+    drawio_xml = generate_multipage_drawio_xml(improved, page_plan, pages=pages)
     xml_issues = [issue for issue in validate_drawio_xml(drawio_xml) if issue.severity == "error"]
     visual_qa_issues = analyze_drawio_xml(drawio_xml)
     renderer = detect_renderer()
-    if args.validate and xml_issues:
-        for issue in xml_issues:
-            print(f"draw.io validation error: {issue.message}", file=sys.stderr)
-        return 3
 
-    (output_dir / "diagram.drawio").write_text(drawio_xml, encoding="utf-8")
+    xml_path = output_dir / "diagram.drawio"
+    xml_path.write_text(drawio_xml, encoding="utf-8")
+    preview_paths = preview.write_previews(pages, output_dir)
+    exports = export_pages_with_renderer(renderer, xml_path, output_dir, len(pages))
+    error_count = qa_error_count(visual_qa_issues, len(xml_issues))
+
     (output_dir / "diagram-summary.md").write_text(render_summary(improved), encoding="utf-8")
     (output_dir / "page-plan.md").write_text(render_page_plan(page_plan), encoding="utf-8")
     (output_dir / "visual-guide.md").write_text(render_visual_guide(visual_pattern), encoding="utf-8")
-    (output_dir / "render-qa.md").write_text(render_visual_qa(visual_qa_issues, renderer), encoding="utf-8")
+    (output_dir / "render-qa.md").write_text(
+        render_visual_qa(
+            visual_qa_issues,
+            renderer,
+            xml_error_count=len(xml_issues),
+            exports=exports,
+            preview_paths=preview_paths,
+        ),
+        encoding="utf-8",
+    )
     (output_dir / "assumptions.md").write_text(render_assumptions(improved), encoding="utf-8")
     (output_dir / "adversarial-review.md").write_text(render_adversarial_review(initial_findings, final_findings), encoding="utf-8")
     (output_dir / "quality-checklist.md").write_text(
@@ -65,7 +84,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     (output_dir / "research-summary.md").write_text(render_research_summary(request, diagram_type), encoding="utf-8")
 
+    print(result_line(error_count))
+    for issue in xml_issues:
+        print(f"draw.io validation error: {issue.message}", file=sys.stderr)
+    for issue in visual_qa_issues:
+        if issue.severity == "error":
+            print(f"visual QA error: {issue.message}", file=sys.stderr)
     print(f"Wrote draw.io diagram and review artifacts to {output_dir}")
+    if args.validate and error_count:
+        return 1
     return 0
 
 
