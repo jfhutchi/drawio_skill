@@ -115,9 +115,13 @@ class SchemaDriftTests(unittest.TestCase):
 
 class ModelCliTests(unittest.TestCase):
     def test_cli_model_flag_trusts_the_model(self):
+        payload = _sample_model()
+        # An icon the agent found via draw.io shape search rides through
+        # the model into the emitted XML as a glyph child.
+        payload["nodes"][0]["icon"] = "mxgraph.weblogos.github"
         with tempfile.TemporaryDirectory() as temp_dir:
             model_path = Path(temp_dir) / "model.json"
-            model_path.write_text(json.dumps(_sample_model()), encoding="utf-8")
+            model_path.write_text(json.dumps(payload), encoding="utf-8")
             output = Path(temp_dir) / "out"
             exit_code = main(["--model", str(model_path), "--output", str(output), "--validate"])
             self.assertEqual(0, exit_code)
@@ -125,6 +129,7 @@ class ModelCliTests(unittest.TestCase):
             # Labels are exactly as authored - no extraction, no regrouping.
             self.assertIn("Web Frontend", xml_text)
             self.assertIn("Orders Database", xml_text)
+            self.assertIn("shape=mxgraph.weblogos.github", xml_text)
             render_qa = (output / "render-qa.md").read_text(encoding="utf-8")
             self.assertTrue(render_qa.startswith("RESULT:"), render_qa.splitlines()[0])
 

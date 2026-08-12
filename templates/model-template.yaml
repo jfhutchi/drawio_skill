@@ -19,7 +19,9 @@ nodes:
   - id: component-example
     label: Example Component
     node_type: api         # see icon_registry.STYLE_REGISTRY keys
-    icon: null             # optional explicit icon/service name, e.g. "azure kubernetes service"
+    icon: null             # service name ("azure kubernetes service") OR an icon found via
+                           # draw.io shape search: full style, "mxgraph.<family>.<name>",
+                           # or bundled image path like "azure2/devops/Azure_DevOps.svg"
     group: boundary-example
     layer: application     # optional; inferred from node_type/label when omitted
     description: Replace with purpose and ownership.

@@ -433,6 +433,30 @@ def _tool_glyph(*candidates: str | None) -> str | None:
     return None
 
 
+def _explicit_icon_style(icon: str | None) -> str | None:
+    """Accept an icon the agent found via draw.io's own shape search.
+
+    The node's ``icon`` field may carry, besides a plain service name:
+    - a full draw.io style string (contains ``shape=`` or ``image=``),
+    - a bare stencil reference like ``mxgraph.weblogos.github``,
+    - a bundled image path like ``img/lib/azure2/devops/Azure_DevOps.svg``
+      (the ``img/lib/`` prefix may be omitted).
+    Anything else is treated as a service name and resolved normally.
+    """
+
+    if not icon:
+        return None
+    text = icon.strip()
+    if "shape=" in text or "image=" in text:
+        return text if text.endswith(";") else text + ";"
+    if text.startswith("mxgraph.") and " " not in text:
+        return f"shape={text};html=1;"
+    if text.endswith(".svg") and "/" in text and " " not in text:
+        path = text if text.startswith("img/") else f"img/lib/{text}"
+        return f"image;sketch=0;aspect=fixed;html=1;points=[];align=center;image={path};"
+    return None
+
+
 def _glyph_style(resolved_style: str) -> str | None:
     """Turn a resolved shape style into a fixed-size glyph-child style.
 
@@ -466,9 +490,12 @@ def get_node_visual(
     """
 
     resolved = get_icon_style(node_type, icon, label)
-    # A tool's own brand mark (GitHub, Docker) beats a generic shape glyph.
-    tool = _tool_glyph(icon, label)
-    glyph = _glyph_style(tool) if tool is not None else _glyph_style(resolved.drawio_style)
+    # Precedence: an icon the agent explicitly chose (e.g. found via draw.io
+    # shape search) > a tool's own brand mark > the resolved service shape.
+    explicit = _explicit_icon_style(icon)
+    tool = _tool_glyph(icon, label) if explicit is None else None
+    glyph_source = explicit or tool or resolved.drawio_style
+    glyph = _glyph_style(glyph_source)
     return NodeVisual(
         card_style=card_style(resolved.category, glyph is not None),
         glyph_style=glyph,

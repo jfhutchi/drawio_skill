@@ -136,6 +136,30 @@ class VisualGrammarTests(unittest.TestCase):
         for label, node_type in (("Terraform", "terraform"), ("Prometheus", "monitoring"), ("Grafana", "dashboard")):
             self.assertIsNone(get_node_visual(node_type, None, label).glyph_style, label)
 
+    def test_agent_supplied_icons_from_drawio_shape_search(self):
+        # Bare stencil reference, as read from draw.io's shape search results.
+        stencil = get_node_visual("process", "mxgraph.weblogos.slack", "Slack Notifications")
+        self.assertIn("shape=mxgraph.weblogos.slack", stencil.glyph_style)
+        self.assertIn("aspect=fixed", stencil.glyph_style)
+
+        # Full style string copied via Edit Style.
+        full = get_node_visual(
+            "monitoring",
+            "sketch=0;html=1;fillColor=#E6522C;shape=mxgraph.some_pack.prometheus;verticalLabelPosition=bottom;",
+            "Prometheus",
+        )
+        self.assertIn("shape=mxgraph.some_pack.prometheus", full.glyph_style)
+        self.assertIn("aspect=fixed", full.glyph_style)
+        self.assertNotIn("verticalLabelPosition=bottom", full.glyph_style)
+
+        # Bundled image path with the img/lib/ prefix omitted.
+        image = get_node_visual("process", "azure2/devops/Azure_DevOps.svg", "Azure DevOps")
+        self.assertIn("image=img/lib/azure2/devops/Azure_DevOps.svg", image.glyph_style)
+
+        # A plain service name is NOT treated as an explicit style.
+        named = get_node_visual("component", "azure kubernetes service", "Workload Cluster")
+        self.assertIn("img/lib/azure2/containers/Kubernetes_Services.svg", named.glyph_style)
+
     def test_category_strokes_match_theme_strokes(self):
         theme = json.loads(
             (REPO_ROOT / "templates" / "default-enterprise-theme.json").read_text(encoding="utf-8")

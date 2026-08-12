@@ -202,7 +202,21 @@ Support at least these categories:
 - Data/messaging: PostgreSQL, SQL Server, MySQL, Oracle, Redis, Kafka, RabbitMQ, queues, event bus, object storage, file share, warehouse, data lake, backup, replication, ETL/ELT.
 - Observability/operations: Prometheus, Grafana, OpenTelemetry, Jaeger, Elastic, Splunk, log analytics, metrics, traces, alerts, incident management, runbooks, SLO/SLA, health checks, synthetic monitoring.
 
-If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. The helper renders every node with one visual grammar: a near-white card with the label inside, and — when the service name resolves to a diagrams.net built-in vendor stencil (`mxgraph.azure.*`, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*`) — a fixed-size 40×40 glyph anchored to the card's top-right. Stencils are never stretched to node size. Unrecognized labels get a plain card, and `validate_vendor_shape_accuracy` warns when a vendor-named node resolves to no glyph. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
+If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. The helper renders every node with one visual grammar: a near-white card with the label inside, and — when the service resolves to bundled diagrams.net artwork (modern `img/lib/azure2/*` Azure icons, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*` stencils, plus verified tool marks like GitHub and Docker) — a fixed-size 40×40 glyph anchored to the card's top-right. Stencils are never stretched to node size. Unrecognized labels get a plain card, and `validate_vendor_shape_accuracy` warns when a vendor-named node resolves to no glyph. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
+
+### Finding icons with draw.io shape search
+
+The built-in registry covers common services, but draw.io's own shape search is the full icon catalog — use it whenever a node that deserves an icon renders as a plain card in the preview:
+
+1. Open diagrams.net (app.diagrams.net or the desktop app) and type the service or tool name into the **shape search box**.
+2. Place the best result on the canvas, select it, and read its style (Ctrl+E / Edit Style, or Extras → Edit Diagram).
+3. Put what you found into the node's `icon` field in `model.json`. All three forms work:
+   - the full style string (anything containing `shape=` or `image=`),
+   - a bare stencil reference such as `mxgraph.weblogos.github`,
+   - a bundled image path such as `azure2/devops/Azure_DevOps.svg` (`img/lib/` prefix optional).
+4. Regenerate and check the preview; before delivery, open the `.drawio` in diagrams.net — an unregistered shape name or wrong image path renders as a blank/placeholder box, which is exactly what the check exists to catch.
+
+Prefer shapes from libraries bundled with diagrams.net so files render everywhere, including offline; avoid external image URLs. The helper renders whatever you supply as the standard 40×40 fixed-aspect glyph on the card.
 
 Use icon-like visual cues for common enterprise review nodes: repository/folder for source control, controller/process for Tower/AWX, server for Linux/Windows targets, cylinder for databases, queue for RabbitMQ/Kafka, note/document for Excel workbooks and reports, vault/lock for secret stores, cloud/object for SFS or object storage, and actor/user shapes for consumers.
 
