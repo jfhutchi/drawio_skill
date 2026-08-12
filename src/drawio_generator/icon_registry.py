@@ -338,6 +338,96 @@ def get_icon_style(
     return IconStyle("fallback", DEFAULT_STYLE, "Component")
 
 
+CARD_FILL = "#ffffff"
+CARD_FONT_COLOR = "#212529"
+GLYPH_SIZE = 40
+
+# One muted stroke per broad category; semantics ride on edge colors,
+# boundary strokes, and glyphs - not rainbow node fills.
+CATEGORY_STROKES: dict[str, str] = {
+    "application": "#6c8ebf",
+    "workflow": "#82b366",
+    "operations": "#82b366",
+    "data": "#d6b656",
+    "security": "#9673a6",
+    "devops": "#9673a6",
+    "network": "#6c8ebf",
+    "cloud": "#6c8ebf",
+    "platform": "#6c8ebf",
+    "infrastructure": "#666666",
+    "general": "#6c757d",
+}
+DEFAULT_STROKE = "#6c757d"
+
+
+@dataclass(frozen=True, slots=True)
+class NodeVisual:
+    """Uniform card grammar for a node: near-white card + optional glyph child."""
+
+    card_style: str
+    glyph_style: str | None
+    category: str
+    vendor: str | None
+    official: bool
+    license_notice: str
+
+
+def card_style(category: str, has_glyph: bool) -> str:
+    base = category.split("-", 1)[0]
+    stroke = CATEGORY_STROKES.get(category, CATEGORY_STROKES.get(base, DEFAULT_STROKE))
+    spacing_right = f"spacingRight={GLYPH_SIZE + 16};" if has_glyph else ""
+    return (
+        f"rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor={CARD_FILL};"
+        f"strokeColor={stroke};strokeWidth=1;fontColor={CARD_FONT_COLOR};"
+        f"fontFamily=Helvetica;fontSize=13;align=left;verticalAlign=middle;"
+        f"spacingLeft=12;{spacing_right}"
+    )
+
+
+def _glyph_style(resolved_style: str) -> str | None:
+    """Turn a resolved shape style into a fixed-size glyph-child style.
+
+    Only styles that reference an actual shape become glyphs; plain colored
+    rectangles carry no extra information beyond the card itself. Stencils are
+    never stretched: the glyph is always emitted at GLYPH_SIZE with
+    aspect=fixed, and label-below positioning is stripped because glyph
+    children have no label.
+    """
+
+    if "shape=" not in resolved_style:
+        return None
+    style = resolved_style.replace("verticalLabelPosition=bottom;", "").replace("verticalAlign=top;", "")
+    if not style.endswith(";"):
+        style += ";"
+    if "aspect=fixed" not in style:
+        style += "aspect=fixed;"
+    return style
+
+
+def get_node_visual(
+    node_type: str | None,
+    icon: str | None = None,
+    label: str | None = None,
+) -> NodeVisual:
+    """Resolve a node to the uniform card grammar.
+
+    The card is always a near-white rounded rectangle with the label inside;
+    a recognized vendor or built-in shape becomes a 40x40 aspect-fixed glyph
+    child anchored to the card's top-right corner.
+    """
+
+    resolved = get_icon_style(node_type, icon, label)
+    glyph = _glyph_style(resolved.drawio_style)
+    return NodeVisual(
+        card_style=card_style(resolved.category, glyph is not None),
+        glyph_style=glyph,
+        category=resolved.category,
+        vendor=resolved.vendor,
+        official=resolved.official,
+        license_notice=resolved.license_notice,
+    )
+
+
 def supported_categories() -> dict[str, list[str]]:
     """Return registry entries grouped by broad category for documentation."""
 

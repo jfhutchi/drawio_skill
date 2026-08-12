@@ -15,6 +15,15 @@ service names.
 The shape strings use the same ``shape=mxgraph.<family>.<name>`` references
 diagrams.net itself emits when those vendor shape libraries are loaded, so
 diagrams open correctly in both the desktop app and ``app.diagrams.net``.
+
+Since the card-grammar pass, these styles are consumed only as fixed-size
+40x40 ``aspect=fixed`` glyph children of near-white node cards (see
+``icon_registry.get_node_visual``) - never stretched to node size.
+
+TODO(azure2): migrate the legacy ``mxgraph.azure.*`` entries to the newer
+``mxgraph.azure2`` image shapes only after manually verifying each image
+path in a real diagrams.net instance - incorrect image paths render as
+blank boxes, which is worse than the legacy glyphs.
 """
 
 from __future__ import annotations
@@ -37,7 +46,7 @@ class BuiltinShape:
 # ---------------------------------------------------------------------------
 
 _AZURE_STYLE_TEMPLATE = (
-    "sketch=0;outlineConnect=0;fontColor=#23A2D9;gradientColor=none;"
+    "sketch=0;outlineConnect=0;fontColor=#212529;gradientColor=none;"
     "fillColor=#0072C6;strokeColor=#0072C6;dashed=0;"
     "verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;"
     "fontSize=12;shape=mxgraph.azure.{shape};"

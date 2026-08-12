@@ -361,6 +361,8 @@ def _box_kind(box: _Box) -> str:
 
     if box.item_id in {"0", "1"} or box.width <= 0 or box.height <= 0:
         return "ignore"
+    if box.item_id.endswith("__icon"):
+        return "ignore"  # glyph child riding its parent card by design
     if (
         box.item_id.endswith("__title")
         or box.item_id.endswith("__legend")

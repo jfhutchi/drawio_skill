@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .icon_registry import get_icon_style
+from .icon_registry import GLYPH_SIZE, get_node_visual
 from .layout_engine import apply_layout, _snap_down, _snap_up
 
 
@@ -333,7 +333,7 @@ def _add_title(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__title",
             "value": _drawio_value(box.text),
-            "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1f2933;",
+            "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontFamily=Helvetica;fontSize=20;fontStyle=1;fontColor=#1f2933;",
             "vertex": "1",
             "parent": "1",
         },
@@ -373,7 +373,8 @@ def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
 
 
 def _add_node(root: ET.Element, node: Node, boundary: Boundary | None = None) -> None:
-    style = get_icon_style(node.node_type, node.icon, node.label).drawio_style
+    visual = get_node_visual(node.node_type, node.icon, node.label)
+    style = visual.card_style
     if node.risk_level and node.risk_level.lower() in {"high", "critical"}:
         style += "strokeColor=#b85450;strokeWidth=2;"
     x = node.x if node.x is not None else 80
@@ -405,6 +406,37 @@ def _add_node(root: ET.Element, node: Node, boundary: Boundary | None = None) ->
             "as": "geometry",
         },
     )
+    if visual.glyph_style:
+        _add_node_glyph(root, node, visual.glyph_style)
+
+
+def _add_node_glyph(root: ET.Element, node: Node, glyph_style: str) -> None:
+    """Fixed-size vendor glyph anchored to the card's top-right corner."""
+
+    glyph = ET.SubElement(
+        root,
+        "mxCell",
+        {
+            "id": f"{node.id}__icon",
+            "value": "",
+            "style": glyph_style,
+            "vertex": "1",
+            "connectable": "0",
+            "parent": node.id,
+        },
+    )
+    geometry = ET.SubElement(
+        glyph,
+        "mxGeometry",
+        {
+            "x": "1",
+            "width": str(GLYPH_SIZE),
+            "height": str(GLYPH_SIZE),
+            "relative": "1",
+            "as": "geometry",
+        },
+    )
+    ET.SubElement(geometry, "mxPoint", {"x": str(-(GLYPH_SIZE + 8)), "y": "8", "as": "offset"})
 
 
 def _add_edge(root: ET.Element, edge: Edge) -> None:
@@ -456,7 +488,7 @@ def _add_edge_number_label(root: ET.Element, edge: Edge, value: str) -> None:
             "id": f"{edge.id}__n",
             "value": _drawio_value(value),
             "style": (
-                "edgeLabel;html=1;rounded=1;"
+                "edgeLabel;html=1;rounded=1;fontFamily=Helvetica;"
                 f"fillColor={_flow_color(edge)};strokeColor=none;fontColor=#ffffff;"
                 "fontStyle=1;fontSize=12;align=center;verticalAlign=middle;spacing=4;"
             ),
@@ -481,7 +513,7 @@ def _add_legend(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
         {
             "id": f"{cell_prefix}__legend",
             "value": _drawio_value(box.text),
-            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;",
+            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;fontFamily=Helvetica;fontSize=12;align=left;spacingLeft=8;verticalAlign=top;",
             "vertex": "1",
             "parent": "1",
         },
@@ -498,7 +530,7 @@ def _add_page_notes(root: ET.Element, diagram: Diagram, box: FurnitureBox | None
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__page_notes",
             "value": _drawio_value(box.text),
-            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
+            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;fontFamily=Helvetica;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
             "vertex": "1",
             "parent": "1",
         },
@@ -515,7 +547,7 @@ def _boundary_style(boundary: Boundary) -> str:
         "swimlane;html=1;rounded=1;startSize=32;container=1;collapsible=0;"
         "dashed=1;dashPattern=8 4;whiteSpace=wrap;"
         f"fillColor={fill};swimlaneFillColor={fill};strokeColor={stroke};"
-        "align=left;spacingLeft=12;fontStyle=1;fontColor=#343a40;fontSize=13;"
+        "align=left;spacingLeft=12;fontStyle=1;fontColor=#343a40;fontFamily=Helvetica;fontSize=13;"
     )
 
 
@@ -524,8 +556,9 @@ def _edge_style(edge: Edge) -> str:
     stroke = _flow_color(edge)
     dashed = "dashed=1;dashPattern=8 4;" if flow_type in {"optional_storage", "security_sensitive"} else ""
     return (
-        "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;"
-        f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;strokeWidth=2;"
+        "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;"
+        f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;"
+        f"fontFamily=Helvetica;strokeWidth=1.5;"
         f"{dashed}"
     )
 
