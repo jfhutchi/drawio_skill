@@ -237,6 +237,12 @@ def _page_size(diagram: Diagram) -> tuple[int, int]:
     for node in diagram.nodes:
         max_x = max(max_x, (node.x or 0) + node.width + 80)
         max_y = max(max_y, (node.y or 0) + node.height + 80)
+    for edge in diagram.edges:
+        route = edge.metadata.get("route")
+        if isinstance(route, list):
+            for point in route:
+                max_x = max(max_x, int(point[0]) + 80)
+                max_y = max(max_y, int(point[1]) + 80)
     legend_rows = ["Legend", *diagram.legends, *_flow_legend_rows(diagram.edges)]
     if len(legend_rows) > 1:
         max_x = max(max_x, 1300)
@@ -339,6 +345,14 @@ def _add_node(root: ET.Element, node: Node) -> None:
 
 def _add_edge(root: ET.Element, edge: Edge) -> None:
     style = edge.style or _edge_style(edge)
+    if not style.endswith(";"):
+        style += ";"
+    exit_port = edge.metadata.get("exit_port")
+    entry_port = edge.metadata.get("entry_port")
+    if isinstance(exit_port, (tuple, list)) and len(exit_port) == 2:
+        style += f"exitX={_style_number(exit_port[0])};exitY={_style_number(exit_port[1])};exitDx=0;exitDy=0;"
+    if isinstance(entry_port, (tuple, list)) and len(entry_port) == 2:
+        style += f"entryX={_style_number(entry_port[0])};entryY={_style_number(entry_port[1])};entryDx=0;entryDy=0;"
     cell = ET.SubElement(
         root,
         "mxCell",
@@ -352,7 +366,17 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
             "target": edge.target,
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+    geometry = ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+    waypoints = edge.metadata.get("waypoints")
+    if isinstance(waypoints, list) and waypoints:
+        array = ET.SubElement(geometry, "Array", {"as": "points"})
+        for point in waypoints:
+            ET.SubElement(array, "mxPoint", {"x": _style_number(point[0]), "y": _style_number(point[1])})
+
+
+def _style_number(value: float) -> str:
+    number = float(value)
+    return str(int(number)) if number == int(number) else f"{number:g}"
 
 
 def _add_flow_badges(root: ET.Element, diagram: Diagram) -> None:
