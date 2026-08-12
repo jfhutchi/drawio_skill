@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+
+from .diagram_model import Diagram
+from .layout_engine import ENTERPRISE_HORIZONTAL_TYPES, HORIZONTAL_TYPES
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +251,52 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
                     )
                 )
 
+        for box in boxes:
+            if box.item_id in {"0", "1"}:
+                continue
+            style = box.style
+            if (
+                "shape=mxgraph." in style
+                and "aspect=fixed" not in style
+                and (box.width > 64 or box.height > 64)
+            ):
+                issues.append(
+                    VisualQaIssue(
+                        "warning",
+                        f"Stencil stretched to {box.width:g}x{box.height:g} without aspect=fixed: {box.item_id}",
+                        page_name,
+                        box.item_id,
+                    )
+                )
+            # Glyph contract: fixed-aspect shapes are emitted square. A ratio
+            # deviating >10% means someone resized a stencil out of shape.
+            if "aspect=fixed" in style and box.width > 0 and box.height > 0 and abs(box.width / box.height - 1) > 0.10:
+                issues.append(
+                    VisualQaIssue(
+                        "warning",
+                        f"Fixed-aspect shape {box.item_id} has geometry ratio {box.width / box.height:.2f}, deviating >10% from square",
+                        page_name,
+                        box.item_id,
+                    )
+                )
+            if box.item_id.endswith("__icon") or not box.label:
+                continue
+            contrast = _style_contrast_ratio(style)
+            if contrast is None:
+                continue
+            # Bold one/two-character values (numbered pills) read like large
+            # text; WCAG large-text threshold 3.0 applies. Everything else 4.5.
+            threshold = 3.0 if ("fontStyle=1" in style and len(box.label) <= 2) else 4.5
+            if contrast < threshold:
+                issues.append(
+                    VisualQaIssue(
+                        "warning",
+                        f"Low text contrast ({contrast:.1f}:1) on {box.label!r}",
+                        page_name,
+                        box.item_id,
+                    )
+                )
+
         is_executive_page = page_name.strip().lower().startswith("executive")
         for box in content_boxes:
             if box.item_id not in connected_ids:
@@ -261,6 +311,164 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
                 )
 
     return issues
+
+
+# ---------------------------------------------------------------------------
+# Model-level QA over the laid-out pages (runs pre-emit; phase 3 owns routes)
+
+NODE_FONT_SIZE = 13
+LINE_HEIGHT = 1.35
+
+
+def analyze_page_models(pages: list[tuple[str, Diagram]]) -> list[VisualQaIssue]:
+    """Deep checks on the planned model: routes, flow direction, text fit."""
+
+    issues: list[VisualQaIssue] = []
+    for page_index, (page_name, diagram) in enumerate(pages, start=1):
+        severity = "error" if page_index == 1 else "warning"
+        issues.extend(_check_route_collisions(page_name, diagram, severity))
+        issues.extend(_check_monotonic_flow(page_name, diagram))
+        issues.extend(_check_text_overflow(page_name, diagram))
+    return issues
+
+
+def _check_route_collisions(page_name: str, diagram: Diagram, severity: str) -> list[VisualQaIssue]:
+    from .drawio_xml import compute_furniture  # local import; drawio_xml does not import visual_qa
+
+    issues: list[VisualQaIssue] = []
+    rects: dict[str, tuple[float, float, float, float]] = {
+        node.id: (float(node.x or 0), float(node.y or 0), float((node.x or 0) + node.width), float((node.y or 0) + node.height))
+        for node in diagram.nodes
+    }
+    furniture = compute_furniture(diagram)
+    furniture_rects = {
+        name: (float(box.x), float(box.y), float(box.x + box.width), float(box.y + box.height))
+        for name, box in (("legend", furniture.legend), ("page notes", furniture.notes))
+        if box is not None
+    }
+    for edge in diagram.edges:
+        route = edge.metadata.get("route")
+        if not isinstance(route, list) or len(route) < 2:
+            continue
+        for p1, p2 in zip(route, route[1:]):
+            for node_id, rect in rects.items():
+                if node_id in {edge.source, edge.target}:
+                    continue
+                if _segment_hits_rect(p1, p2, rect):
+                    issues.append(
+                        VisualQaIssue(
+                            severity,
+                            f"Planned route of {edge.id} crosses node {node_id}",
+                            page_name,
+                            edge.id,
+                        )
+                    )
+            for name, rect in furniture_rects.items():
+                if _segment_hits_rect(p1, p2, rect):
+                    issues.append(
+                        VisualQaIssue(
+                            severity,
+                            f"Planned route of {edge.id} crosses the {name}",
+                            page_name,
+                            edge.id,
+                        )
+                    )
+    return issues
+
+
+def _check_monotonic_flow(page_name: str, diagram: Diagram) -> list[VisualQaIssue]:
+    diagram_type = diagram.diagram_type.lower()
+    horizontal = (
+        diagram_type in HORIZONTAL_TYPES
+        or diagram_type in ENTERPRISE_HORIZONTAL_TYPES
+        or diagram.direction.lower() == "left-to-right"
+    )
+    nodes = {node.id: node for node in diagram.nodes}
+    issues: list[VisualQaIssue] = []
+    for edge in diagram.edges:
+        if edge.metadata.get("sequence") is None:
+            continue
+        if edge.direction.lower() in {"backward", "reverse", "return"}:
+            continue  # explicitly declared backward flows are allowed
+        source, target = nodes.get(edge.source), nodes.get(edge.target)
+        if source is None or target is None:
+            continue
+        flow = (lambda n: n.x or 0) if horizontal else (lambda n: n.y or 0)
+        cross = (lambda n: n.y or 0) if horizontal else (lambda n: n.x or 0)
+        if flow(source) < flow(target):
+            continue
+        if flow(source) == flow(target) and cross(source) < cross(target):
+            continue
+        issues.append(
+            VisualQaIssue(
+                "error",
+                f"Numbered flow {edge.metadata.get('sequence')} ({edge.id}) points backward/upward against the reading direction",
+                page_name,
+                edge.id,
+            )
+        )
+    return issues
+
+
+def _check_text_overflow(page_name: str, diagram: Diagram) -> list[VisualQaIssue]:
+    from .icon_registry import get_node_visual
+
+    issues: list[VisualQaIssue] = []
+    for node in diagram.nodes:
+        has_glyph = get_node_visual(node.node_type, node.icon, node.label).glyph_style is not None
+        inner_width = node.width - 12 - (56 if has_glyph else 12)
+        char_width = 0.6 * NODE_FONT_SIZE
+        longest_word = max((len(word) for word in node.label.split()), default=0)
+        if longest_word * char_width > inner_width:
+            issues.append(
+                VisualQaIssue(
+                    "warning",
+                    f"Label wider than card: {node.label!r} needs {int(longest_word * char_width)}px, card offers {int(inner_width)}px",
+                    page_name,
+                    node.id,
+                )
+            )
+            continue
+        max_chars = max(4, int(inner_width / char_width))
+        line_count = 0
+        for raw_line in node.label.split("\n"):
+            words = raw_line.split()
+            if not words:
+                line_count += 1
+                continue
+            current = words[0]
+            for word in words[1:]:
+                if len(current) + 1 + len(word) <= max_chars:
+                    current = f"{current} {word}"
+                else:
+                    line_count += 1
+                    current = word
+            line_count += 1
+        if line_count * NODE_FONT_SIZE * LINE_HEIGHT > node.height - 16:
+            issues.append(
+                VisualQaIssue(
+                    "warning",
+                    f"Label taller than card: {node.label!r} needs about {line_count} lines",
+                    page_name,
+                    node.id,
+                )
+            )
+    return issues
+
+
+def _segment_hits_rect(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    rect: tuple[float, float, float, float],
+    slack: float = 1.0,
+) -> bool:
+    """Axis-aligned segment vs rect interior (planned routes are orthogonal)."""
+
+    (x1, y1), (x2, y2) = (p1[0], p1[1]), (p2[0], p2[1])
+    rx1, ry1, rx2, ry2 = rect
+    lo_x, hi_x = sorted((x1, x2))
+    lo_y, hi_y = sorted((y1, y2))
+    return lo_x < rx2 - slack and hi_x > rx1 + slack and lo_y < ry2 - slack and hi_y > ry1 + slack
 
 
 def qa_error_count(issues: list[VisualQaIssue], xml_error_count: int = 0) -> int:
@@ -386,3 +594,26 @@ def _float_attr(element: ET.Element, name: str, default: float) -> float:
         return float(element.attrib.get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+_FONT_COLOR_RE = re.compile(r"fontColor=(#[0-9a-fA-F]{6})")
+_FILL_COLOR_RE = re.compile(r"fillColor=(#[0-9a-fA-F]{6})")
+
+
+def _style_contrast_ratio(style: str) -> float | None:
+    """WCAG contrast ratio of fontColor vs fillColor when both are set."""
+
+    font_match = _FONT_COLOR_RE.search(style)
+    fill_match = _FILL_COLOR_RE.search(style)
+    if font_match is None or fill_match is None:
+        return None
+    first = _relative_luminance(font_match.group(1))
+    second = _relative_luminance(fill_match.group(1))
+    lighter, darker = max(first, second), min(first, second)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _relative_luminance(hex_color: str) -> float:
+    channels = [int(hex_color[i : i + 2], 16) / 255.0 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]

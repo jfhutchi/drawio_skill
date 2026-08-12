@@ -20,6 +20,7 @@ from .validators import redact_sensitive_text, validate_drawio_xml, validate_mod
 from .visual_patterns import recommend_visual_pattern, render_visual_guide
 from .visual_qa import (
     analyze_drawio_xml,
+    analyze_page_models,
     detect_renderer,
     export_pages_with_renderer,
     qa_error_count,
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     pages = build_page_diagrams(improved, page_plan)
     drawio_xml = generate_multipage_drawio_xml(improved, page_plan, pages=pages)
     xml_issues = [issue for issue in validate_drawio_xml(drawio_xml) if issue.severity == "error"]
-    visual_qa_issues = analyze_drawio_xml(drawio_xml)
+    visual_qa_issues = analyze_page_models(pages) + analyze_drawio_xml(drawio_xml)
     renderer = detect_renderer()
 
     xml_path = output_dir / "diagram.drawio"
