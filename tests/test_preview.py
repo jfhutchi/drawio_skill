@@ -59,6 +59,28 @@ class PreviewSceneTests(unittest.TestCase):
         self.assertIn(">1</text>", svg_text)
         self.assertIn("furniture-legend", svg_text)
 
+    def test_vendor_nodes_render_glyph_markers(self):
+        diagram = apply_layout(
+            Diagram(
+                title="Glyphs",
+                diagram_type="enterprise",
+                nodes=[
+                    Node(id="aks", label="AKS", node_type="kubernetes"),
+                    Node(id="plain", label="Custom Billing Service", node_type="backend"),
+                ],
+                edges=[Edge(id="e", source="aks", target="plain", label="calls", metadata={"sequence": 1})],
+            )
+        )
+        svg_text = preview.render_page_svg(preview.build_scene("Page 1", diagram))
+        root = ET.fromstring(svg_text)
+        glyphs = [el for el in root.iter(f"{SVG_NS}rect") if el.attrib.get("class") == "node-glyph"]
+        monograms = [el.text for el in root.iter(f"{SVG_NS}text") if el.attrib.get("class") == "node-glyph-label"]
+        # AKS resolves to the Azure stencil -> one glyph marker; the plain
+        # backend card gets none.
+        self.assertEqual(1, len(glyphs))
+        self.assertEqual(["Az"], monograms)
+        self.assertEqual("#0072C6", glyphs[0].attrib.get("fill"))
+
 
 class PreviewWriteTests(unittest.TestCase):
     def test_write_previews_creates_svg_per_page(self):

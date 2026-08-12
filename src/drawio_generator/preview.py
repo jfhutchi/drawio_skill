@@ -15,9 +15,13 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import re
+
 from .diagram_model import Diagram, Edge, Node
 from .drawio_xml import compute_furniture, _edge_value, _flow_color, _page_size
+from .icon_registry import GLYPH_SIZE, get_node_visual
 from .layout_engine import route_midpoint
+from .visual_qa import _relative_luminance
 
 CHAR_WIDTH_FACTOR = 0.6  # estimated glyph width = 0.6 * fontSize
 LINE_HEIGHT_FACTOR = 1.35
@@ -131,11 +135,52 @@ def build_scene(page_name: str, diagram: Diagram) -> PageScene:
     return scene
 
 
+_GLYPH_FILL_RE = re.compile(r"fillColor=(#[0-9a-fA-F]{6})")
+_GLYPH_SHAPE_RE = re.compile(r"shape=([A-Za-z0-9_.]+)")
+
+_VENDOR_MONOGRAMS = {"azure": "Az", "aws": "AWS", "gcp": "GCP", "kubernetes": "K8s"}
+_SHAPE_MONOGRAMS = {
+    "cylinder3d": "DB",
+    "umlActor": "USR",
+    "folder": "SRC",
+    "package": "PKG",
+    "note": "DOC",
+    "document": "DOC",
+    "cloud": "OBJ",
+    "mxgraph.basic.queue": "MQ",
+    "mxgraph.cisco19.rect": "SRV",
+}
+
+
+def _glyph_marker(glyph_style: str, vendor: str | None) -> tuple[str, str]:
+    """(fill, monogram) standing in for a stencil the stdlib cannot rasterize.
+
+    The real vendor artwork lives in the emitted .drawio (and in the optional
+    real-renderer export); the preview shows the glyph's exact slot, color,
+    and identity so its presence and geometry are reviewable.
+    """
+
+    fill_match = _GLYPH_FILL_RE.search(glyph_style)
+    fill = fill_match.group(1) if fill_match else "#6c757d"
+    if vendor in _VENDOR_MONOGRAMS:
+        return fill, _VENDOR_MONOGRAMS[vendor]
+    shape_match = _GLYPH_SHAPE_RE.search(glyph_style)
+    token = shape_match.group(1) if shape_match else ""
+    if token in _SHAPE_MONOGRAMS:
+        return fill, _SHAPE_MONOGRAMS[token]
+    short = token.rsplit(".", 1)[-1]
+    return fill, (short[:2].upper() or "??")
+
+
 def _add_node_shapes(shapes: list[Shape], node: Node) -> None:
     x, y = float(node.x or 0), float(node.y or 0)
     w, h = float(node.width), float(node.height)
     shapes.append(Shape("rect", "node", ((x, y), (w, h)), fill="#fdfdfd", stroke="#495057"))
-    lines = wrap_label(node.label, w - 12.0, NODE_FONT_SIZE)
+    visual = get_node_visual(node.node_type, node.icon, node.label)
+    # Mirror the emitted card grammar: label left-aligned with reserved
+    # right-hand space when a glyph child rides the card.
+    label_width = w - 24.0 - (GLYPH_SIZE + 16.0 if visual.glyph_style else 0.0)
+    lines = wrap_label(node.label, label_width, NODE_FONT_SIZE)
     line_height = NODE_FONT_SIZE * LINE_HEIGHT_FACTOR
     start_y = y + h / 2.0 - line_height * (len(lines) - 1) / 2.0 + NODE_FONT_SIZE / 3.0
     for index, line in enumerate(lines):
@@ -143,10 +188,27 @@ def _add_node_shapes(shapes: list[Shape], node: Node) -> None:
             Shape(
                 "text",
                 "node-label",
-                ((x + w / 2.0, start_y + index * line_height),),
+                ((x + 12.0, start_y + index * line_height),),
                 text=line,
                 font_size=NODE_FONT_SIZE,
                 fill="#212529",
+            )
+        )
+    if visual.glyph_style:
+        fill, monogram = _glyph_marker(visual.glyph_style, visual.vendor)
+        gx = x + w - GLYPH_SIZE - 8.0
+        gy = y + 8.0
+        shapes.append(Shape("rect", "node-glyph", ((gx, gy), (float(GLYPH_SIZE), float(GLYPH_SIZE))), fill=fill))
+        text_fill = "#ffffff" if _relative_luminance(fill) < 0.45 else "#212529"
+        shapes.append(
+            Shape(
+                "text",
+                "node-glyph-label",
+                ((gx + GLYPH_SIZE / 2.0, gy + GLYPH_SIZE / 2.0 + 4.0),),
+                text=monogram,
+                font_size=11,
+                bold=True,
+                fill=text_fill,
                 anchor="middle",
             )
         )
