@@ -15,7 +15,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import base64
 import re
+from functools import lru_cache
 
 from .diagram_model import Diagram, Edge, Node
 from .drawio_xml import compute_furniture, _edge_value, _flow_color, _page_size
@@ -51,6 +53,7 @@ class Shape:
     font_size: int = FURNITURE_FONT_SIZE
     bold: bool = False
     anchor: str = "start"
+    href: str | None = None  # kind "icon": embedded data URI; fill/text are the raster fallback
 
 
 @dataclass(slots=True)
@@ -156,6 +159,25 @@ _SHAPE_MONOGRAMS = {
 
 _VENDOR_BRAND_FILLS = {"azure": "#0078D4", "aws": "#FF9900", "gcp": "#4285F4", "kubernetes": "#326CE5"}
 
+_ASSET_ROOT = Path(__file__).resolve().parent / "assets"
+_GLYPH_IMAGE_PATH_RE = re.compile(r"image=img/lib/([^;]+);")
+
+
+@lru_cache(maxsize=None)
+def _asset_data_uri(relative_path: str) -> str | None:
+    """Vendored copy of a bundled diagrams.net icon, as an embeddable data URI."""
+
+    path = _ASSET_ROOT / relative_path
+    if not path.is_file():
+        return None
+    payload = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/svg+xml;base64,{payload}"
+
+
+def _glyph_data_uri(glyph_style: str) -> str | None:
+    match = _GLYPH_IMAGE_PATH_RE.search(glyph_style)
+    return _asset_data_uri(match.group(1)) if match else None
+
 
 def _glyph_marker(glyph_style: str, vendor: str | None) -> tuple[str, str]:
     """(fill, monogram) standing in for a stencil the stdlib cannot rasterize.
@@ -210,6 +232,20 @@ def _add_node_shapes(shapes: list[Shape], node: Node) -> None:
         fill, monogram = _glyph_marker(visual.glyph_style, visual.vendor)
         gx = x + w - GLYPH_SIZE - 8.0
         gy = y + 8.0
+        href = _glyph_data_uri(visual.glyph_style)
+        if href is not None:
+            # Real vendored artwork, embedded so the SVG stays self-contained.
+            shapes.append(
+                Shape(
+                    "icon",
+                    "node-glyph-image",
+                    ((gx, gy), (float(GLYPH_SIZE), float(GLYPH_SIZE))),
+                    text=monogram,
+                    fill=fill,
+                    href=href,
+                )
+            )
+            return
         shapes.append(Shape("rect", "node-glyph", ((gx, gy), (float(GLYPH_SIZE), float(GLYPH_SIZE))), fill=fill))
         text_fill = "#ffffff" if _relative_luminance(fill) < 0.45 else "#212529"
         shapes.append(
@@ -365,6 +401,20 @@ def render_page_svg(scene: PageScene) -> str:
                     "fill": shape.fill or "#495057",
                 },
             )
+        elif shape.kind == "icon" and shape.href:
+            (x, y), (w, h) = shape.points
+            ET.SubElement(
+                svg,
+                "image",
+                {
+                    "class": shape.cls,
+                    "x": f"{x:g}",
+                    "y": f"{y:g}",
+                    "width": f"{w:g}",
+                    "height": f"{h:g}",
+                    "href": shape.href,
+                },
+            )
         elif shape.kind == "text":
             ((x, y),) = shape.points
             attrs = {
@@ -439,7 +489,14 @@ def _write_png_pil(modules, scene: PageScene, path: Path) -> None:
     image = Image.new("RGB", (scene.width, scene.height), "#ffffff")
     draw = ImageDraw.Draw(image)
     for shape in scene.shapes:
-        if shape.kind == "rect":
+        if shape.kind == "icon":
+            # Raster backends cannot rasterize the embedded SVG; draw the
+            # brand-color marker fallback instead.
+            (x, y), (w, h) = shape.points
+            draw.rectangle([x, y, x + w, y + h], fill=shape.fill or "#6c757d")
+            tx = x + w / 2.0 - estimate_text_width(shape.text, 11) / 2.0
+            draw.text((tx, y + h / 2.0 - 6), shape.text, fill="#ffffff")
+        elif shape.kind == "rect":
             (x, y), (w, h) = shape.points
             draw.rectangle([x, y, x + w, y + h], fill=shape.fill, outline=shape.stroke)
         elif shape.kind == "line":
@@ -462,6 +519,11 @@ def _write_png_matplotlib(pyplot, scene: PageScene, path: Path) -> None:
     axes.set_ylim(scene.height, 0)
     axes.axis("off")
     for shape in scene.shapes:
+        if shape.kind == "icon":
+            (x, y), (w, h) = shape.points
+            axes.add_patch(pyplot.Rectangle((x, y), w, h, facecolor=shape.fill or "#6c757d"))
+            axes.text(x + w / 2, y + h / 2, shape.text, fontsize=8, color="#ffffff", ha="center", va="center")
+            continue
         if shape.kind == "rect":
             (x, y), (w, h) = shape.points
             axes.add_patch(

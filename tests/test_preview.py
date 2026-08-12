@@ -59,7 +59,7 @@ class PreviewSceneTests(unittest.TestCase):
         self.assertIn(">1</text>", svg_text)
         self.assertIn("furniture-legend", svg_text)
 
-    def test_vendor_nodes_render_glyph_markers(self):
+    def test_vendor_nodes_embed_real_icon_artwork(self):
         diagram = apply_layout(
             Diagram(
                 title="Glyphs",
@@ -73,14 +73,42 @@ class PreviewSceneTests(unittest.TestCase):
         )
         svg_text = preview.render_page_svg(preview.build_scene("Page 1", diagram))
         root = ET.fromstring(svg_text)
-        glyphs = [el for el in root.iter(f"{SVG_NS}rect") if el.attrib.get("class") == "node-glyph"]
+        images = [el for el in root.iter(f"{SVG_NS}image") if el.attrib.get("class") == "node-glyph-image"]
+        # AKS resolves to the vendored azure2 icon, embedded as a data URI;
+        # the plain backend card gets nothing.
+        self.assertEqual(1, len(images))
+        self.assertTrue(images[0].attrib.get("href", "").startswith("data:image/svg+xml;base64,"))
+        self.assertEqual("40", images[0].attrib.get("width"))
+
+    def test_stencil_glyphs_without_local_artwork_fall_back_to_markers(self):
+        diagram = apply_layout(
+            Diagram(
+                title="Marker",
+                diagram_type="enterprise",
+                nodes=[
+                    Node(id="gh", label="GitHub Actions", node_type="process"),
+                    Node(id="plain", label="Peer", node_type="backend"),
+                ],
+                edges=[Edge(id="e", source="gh", target="plain", label="calls", metadata={"sequence": 1})],
+            )
+        )
+        svg_text = preview.render_page_svg(preview.build_scene("Page 1", diagram))
+        root = ET.fromstring(svg_text)
+        # The weblogos GitHub glyph is a drawio stencil (no SVG file to
+        # embed), so the preview keeps the monogram marker for it.
+        markers = [el for el in root.iter(f"{SVG_NS}rect") if el.attrib.get("class") == "node-glyph"]
         monograms = [el.text for el in root.iter(f"{SVG_NS}text") if el.attrib.get("class") == "node-glyph-label"]
-        # AKS resolves to the Azure stencil -> one glyph marker; the plain
-        # backend card gets none.
-        self.assertEqual(1, len(glyphs))
-        self.assertEqual(["Az"], monograms)
-        # azure2 image glyphs carry no fillColor; the marker uses the brand color.
-        self.assertEqual("#0078D4", glyphs[0].attrib.get("fill"))
+        self.assertEqual(1, len(markers))
+        self.assertEqual(["GH"], monograms)
+
+    def test_every_azure2_mapping_has_vendored_artwork(self):
+        from drawio_generator.builtin_vendor_shapes import _AZURE2_IMAGES
+
+        asset_root = Path(preview.__file__).resolve().parent / "assets"
+        for relative in sorted(set(_AZURE2_IMAGES.values())):
+            path = asset_root / "azure2" / relative
+            self.assertTrue(path.is_file(), f"missing vendored icon: {relative}")
+            self.assertIn("<svg", path.read_text(encoding="utf-8", errors="replace"), relative)
 
 
 class PreviewWriteTests(unittest.TestCase):
