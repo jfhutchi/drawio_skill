@@ -86,41 +86,42 @@ class MonotonicFlowTests(unittest.TestCase):
 
 
 class TextOverflowTests(unittest.TestCase):
-    def test_unbreakable_wide_label_warns(self):
+    def test_layout_scales_cards_so_labels_fit(self):
+        diagram = Diagram(
+            title="Fits",
+            diagram_type="enterprise",
+            nodes=[
+                Node(id="a", label="Distributed Engines (Azure VMs per site / on-prem via VPN or ExpressRoute)"),
+                Node(id="b", label="Supercalifragilisticexpialidocious-Hyperconverged-Aggregator"),
+            ],
+            edges=[Edge(id="e", source="a", target="b", label="x", metadata={"sequence": 1})],
+        )
+        laid_out = apply_layout(diagram)
+        # The fitter grew the cards; QA finds no overflow.
+        issues = analyze_page_models([("Executive Overview", laid_out)])
+        overflow = [issue for issue in issues if "than card" in issue.message]
+        self.assertEqual([], overflow)
+        long_card = next(node for node in laid_out.nodes if node.id == "a")
+        self.assertGreater(long_card.width * long_card.height, 190 * 90)
+
+    def test_overflow_warnings_still_guard_hand_set_geometry(self):
         diagram = Diagram(
             title="Overflow",
             diagram_type="enterprise",
             nodes=[
-                Node(id="a", label="Supercalifragilisticexpialidocious-Hyperconverged-Aggregator", width=190, height=90),
-                Node(id="b", label="Peer", width=190, height=90),
+                Node(id="a", label="Supercalifragilisticexpialidocious-Hyperconverged-Aggregator"),
+                Node(id="b", label="one two three four five six seven eight nine ten eleven twelve thirteen fourteen"),
             ],
             edges=[Edge(id="e", source="a", target="b", label="x", metadata={"sequence": 1})],
         )
         laid_out = apply_layout(diagram)
+        # Simulate an agent (or human) shrinking cards after layout.
+        for node in laid_out.nodes:
+            node.width = 150
+            node.height = 40
         issues = analyze_page_models([("Executive Overview", laid_out)])
-        overflow = [issue for issue in issues if "wider than card" in issue.message]
-        self.assertEqual(1, len(overflow))
-        self.assertEqual("warning", overflow[0].severity)
-
-    def test_too_many_lines_warns(self):
-        diagram = Diagram(
-            title="Overflow",
-            diagram_type="code",
-            nodes=[
-                Node(
-                    id="a",
-                    label="one two three four five six seven eight nine ten eleven twelve thirteen fourteen",
-                    width=150,
-                    height=40,
-                ),
-                Node(id="b", label="Peer", width=150, height=40),
-            ],
-            edges=[Edge(id="e", source="a", target="b", label="x", metadata={"sequence": 1})],
-        )
-        laid_out = apply_layout(diagram)
-        issues = analyze_page_models([("Executive Overview", laid_out)])
-        overflow = [issue for issue in issues if "taller than card" in issue.message]
-        self.assertEqual(1, len(overflow))
+        self.assertTrue(any("wider than card" in issue.message for issue in issues))
+        self.assertTrue(any("taller than card" in issue.message for issue in issues))
 
 
 class ContrastAndAspectTests(unittest.TestCase):

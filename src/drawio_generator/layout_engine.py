@@ -28,9 +28,15 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from .diagram_model import Diagram, Edge, Node
+from .icon_registry import GLYPH_SIZE, get_node_visual
 
 
 GRID_SIZE = 10
+NODE_FONT_SIZE = 13
+CHAR_WIDTH = 0.6 * NODE_FONT_SIZE
+LINE_HEIGHT = 18
+CARD_MAX_WIDTH = 400
+CARD_COMFORT_HEIGHT = 130  # grow height up to here before widening instead
 BOUNDARY_PAD = 24
 BOUNDARY_LABEL_PAD = 40
 NODE_GAP = 40
@@ -140,6 +146,7 @@ def apply_layout(diagram: Diagram) -> Diagram:
         if not node.layer:
             node.layer = infer_layer(node)
         _normalize_node_size(laid_out, node)
+        _fit_node_to_label(node)
         node.width = _snap_up(node.width)
         node.height = _snap_up(node.height)
 
@@ -159,6 +166,48 @@ def _normalize_node_size(diagram: Diagram, node: Node) -> None:
         return
     node.width = max(node.width, MIN_ENTERPRISE_NODE_WIDTH)
     node.height = max(node.height, MIN_ENTERPRISE_NODE_HEIGHT)
+
+
+def _wrapped_line_count(text: str, max_chars: int) -> int:
+    count = 0
+    for raw_line in str(text).split("\n"):
+        words = raw_line.split()
+        if not words:
+            count += 1
+            continue
+        current = words[0]
+        for word in words[1:]:
+            if len(current) + 1 + len(word) <= max_chars:
+                current = f"{current} {word}"
+            else:
+                count += 1
+                current = word
+        count += 1
+    return count
+
+
+def _fit_node_to_label(node: Node) -> None:
+    """Scale the card so its wrapped label fits inside it.
+
+    Uses the shared 0.6 * fontSize glyph-width estimate. Height grows first;
+    when the card would get taller than CARD_COMFORT_HEIGHT the card widens
+    instead, up to CARD_MAX_WIDTH. Never shrinks agent-supplied sizes.
+    """
+
+    has_glyph = get_node_visual(node.node_type, node.icon, node.label).glyph_style is not None
+    reserve = 12 + (GLYPH_SIZE + 16 if has_glyph else 12)
+    longest_word = max((len(word) for word in node.label.split()), default=1)
+    width = max(node.width, _snap_up(longest_word * CHAR_WIDTH + reserve))
+    while True:
+        inner = width - reserve
+        max_chars = max(4, int(inner / CHAR_WIDTH))
+        lines = _wrapped_line_count(node.label, max_chars)
+        needed_height = _snap_up(lines * LINE_HEIGHT + 30)
+        if needed_height <= max(node.height, CARD_COMFORT_HEIGHT) or width >= CARD_MAX_WIDTH:
+            break
+        width = _snap_up(width + 40)
+    node.width = width
+    node.height = max(node.height, needed_height)
 
 
 def _layout_enterprise_horizontal(diagram: Diagram) -> None:

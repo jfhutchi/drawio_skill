@@ -211,9 +211,9 @@ def _add_node_shapes(shapes: list[Shape], node: Node) -> None:
     w, h = float(node.width), float(node.height)
     shapes.append(Shape("rect", "node", ((x, y), (w, h)), fill="#fdfdfd", stroke="#495057"))
     visual = get_node_visual(node.node_type, node.icon, node.label)
-    # Mirror the emitted card grammar: label left-aligned with reserved
-    # right-hand space when a glyph child rides the card.
-    label_width = w - 24.0 - (GLYPH_SIZE + 16.0 if visual.glyph_style else 0.0)
+    # Mirror the emitted card grammar and the layout fitter: spacingLeft=12
+    # plus reserved right-hand space (glyph or plain padding).
+    label_width = w - 12.0 - (GLYPH_SIZE + 16.0 if visual.glyph_style else 12.0)
     lines = wrap_label(node.label, label_width, NODE_FONT_SIZE)
     line_height = NODE_FONT_SIZE * LINE_HEIGHT_FACTOR
     start_y = y + h / 2.0 - line_height * (len(lines) - 1) / 2.0 + NODE_FONT_SIZE / 3.0
