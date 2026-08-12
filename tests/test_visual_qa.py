@@ -71,6 +71,68 @@ class VisualQaTests(unittest.TestCase):
         self.assertEqual(1, len(disconnected))
         self.assertEqual("warning", disconnected[0].severity)
 
+    def test_orphan_ellipse_badge_is_an_error(self):
+        xml_text = """<mxfile host="app.diagrams.net">
+  <diagram name="QA">
+    <mxGraphModel pageWidth="500" pageHeight="300">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="a" value="A" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="20" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="b" value="B" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="300" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="e" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="__badge_e" value="1" style="ellipse;fillColor=#4f46e5;" vertex="1" parent="1"><mxGeometry x="200" y="115" width="28" height="28" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>"""
+
+        issues = analyze_drawio_xml(xml_text)
+        orphan = [issue for issue in issues if "Orphan numbered badge" in issue.message]
+        self.assertEqual(1, len(orphan))
+        self.assertEqual("error", orphan[0].severity)
+
+    def test_double_numbering_is_an_error(self):
+        xml_text = """<mxfile host="app.diagrams.net">
+  <diagram name="QA">
+    <mxGraphModel pageWidth="500" pageHeight="300">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="a" value="A" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="20" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="b" value="B" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="300" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="e" value="1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e__n" value="1" style="edgeLabel;html=1;" vertex="1" connectable="0" parent="e"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>"""
+
+        issues = analyze_drawio_xml(xml_text)
+        double = [issue for issue in issues if "Double numbering" in issue.message]
+        self.assertEqual(1, len(double))
+        self.assertEqual("error", double[0].severity)
+
+    def test_single_edgelabel_numbering_is_clean(self):
+        xml_text = """<mxfile host="app.diagrams.net">
+  <diagram name="QA">
+    <mxGraphModel pageWidth="500" pageHeight="300">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="a" value="A" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="20" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="b" value="B" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="300" y="100" width="120" height="60" as="geometry" /></mxCell>
+        <mxCell id="e" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e__n" value="1" style="edgeLabel;html=1;fillColor=#4f46e5;" vertex="1" connectable="0" parent="e"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>"""
+
+        issues = analyze_drawio_xml(xml_text)
+        numbering = [issue for issue in issues if "numbering" in issue.message.lower() or "badge" in issue.message.lower()]
+        self.assertEqual([], numbering)
+
     def test_visual_qa_markdown_reports_renderer_availability_without_claiming_render(self):
         renderer = detect_renderer()
         markdown = render_visual_qa([], renderer)

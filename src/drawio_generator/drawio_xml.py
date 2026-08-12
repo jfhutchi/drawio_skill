@@ -9,7 +9,7 @@ from typing import Any
 
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
 from .icon_registry import get_icon_style
-from .layout_engine import apply_layout, route_midpoint, _snap_down, _snap_up
+from .layout_engine import apply_layout, _snap_down, _snap_up
 
 
 LEGEND_WIDTH = 320
@@ -231,7 +231,6 @@ def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> N
         _add_legend(root, laid_out, furniture.legend)
     for edge in laid_out.edges:
         _add_edge(root, edge)
-    _add_flow_badges(root, laid_out)
     _add_page_notes(root, laid_out, furniture.notes)
 
 
@@ -412,6 +411,12 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
     style = edge.style or _edge_style(edge)
     if not style.endswith(";"):
         style += ";"
+    sequence = edge.metadata.get("sequence")
+    display_label = edge.metadata.get("display_label")
+    numbered = sequence is not None and display_label is None
+    value = "" if numbered else _drawio_value(_edge_value(edge))
+    if value:
+        style += "labelBackgroundColor=#ffffff;"
     exit_port = edge.metadata.get("exit_port")
     entry_port = edge.metadata.get("entry_port")
     if isinstance(exit_port, (tuple, list)) and len(exit_port) == 2:
@@ -423,7 +428,7 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
         "mxCell",
         {
             "id": edge.id,
-            "value": _drawio_value(_edge_value(edge)),
+            "value": value,
             "style": style,
             "edge": "1",
             "parent": "1",
@@ -437,52 +442,35 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
         array = ET.SubElement(geometry, "Array", {"as": "points"})
         for point in waypoints:
             ET.SubElement(array, "mxPoint", {"x": _style_number(point[0]), "y": _style_number(point[1])})
+    if numbered:
+        _add_edge_number_label(root, edge, str(sequence))
+
+
+def _add_edge_number_label(root: ET.Element, edge: Edge, value: str) -> None:
+    """One numbered pill that rides the edge route forever (single numbering mechanism)."""
+
+    label = ET.SubElement(
+        root,
+        "mxCell",
+        {
+            "id": f"{edge.id}__n",
+            "value": _drawio_value(value),
+            "style": (
+                "edgeLabel;html=1;rounded=1;"
+                f"fillColor={_flow_color(edge)};strokeColor=none;fontColor=#ffffff;"
+                "fontStyle=1;fontSize=12;align=center;verticalAlign=middle;spacing=4;"
+            ),
+            "vertex": "1",
+            "connectable": "0",
+            "parent": edge.id,
+        },
+    )
+    ET.SubElement(label, "mxGeometry", {"relative": "1", "as": "geometry"})
 
 
 def _style_number(value: float) -> str:
     number = float(value)
     return str(int(number)) if number == int(number) else f"{number:g}"
-
-
-def _add_flow_badges(root: ET.Element, diagram: Diagram) -> None:
-    nodes = {node.id: node for node in diagram.nodes}
-    cell_prefix = str(diagram.metadata.get("cell_prefix", ""))
-    for edge in diagram.edges:
-        sequence = edge.metadata.get("sequence")
-        source = nodes.get(edge.source)
-        target = nodes.get(edge.target)
-        if sequence is None or source is None or target is None:
-            continue
-        _add_flow_badge(root, edge, source, target, str(sequence), cell_prefix)
-
-
-def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, value: str, cell_prefix: str = "") -> None:
-    size = 28
-    route = edge.metadata.get("route")
-    if isinstance(route, list) and len(route) >= 2:
-        mid_x, mid_y = route_midpoint([(float(px), float(py)) for px, py in route])
-    else:
-        mid_x = ((source.x or 0) + source.width + (target.x or 0)) / 2
-        mid_y = ((source.y or 0) + source.height // 2 + (target.y or 0) + target.height // 2) / 2
-    x = max(30, int(mid_x) - size // 2)
-    y = max(30, int(mid_y) - size // 2)
-    fill = _flow_color(edge)
-    cell = ET.SubElement(
-        root,
-        "mxCell",
-        {
-            "id": f"{cell_prefix}__badge_{edge.id}",
-            "value": _drawio_value(value),
-            "style": (
-                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;"
-                f"fillColor={fill};strokeColor=#ffffff;fontColor=#ffffff;fontStyle=1;fontSize=13;"
-                "align=center;verticalAlign=middle;spacing=0;"
-            ),
-            "vertex": "1",
-            "parent": "1",
-        },
-    )
-    ET.SubElement(cell, "mxGeometry", {"x": str(x), "y": str(y), "width": str(size), "height": str(size), "as": "geometry"})
 
 
 def _add_legend(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:

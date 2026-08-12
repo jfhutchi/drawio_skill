@@ -204,7 +204,28 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
                         )
                     )
 
-        badge_values = {cell.attrib.get("value") for cell in model.findall(".//mxCell[@vertex='1']") if "ellipse" in cell.attrib.get("style", "")}
+        # Exactly one numbering mechanism: numbered pills are edgeLabel child
+        # cells parented to their edge. Floating ellipse badges and digit
+        # edge values are the legacy double-numbering mechanisms.
+        edge_ids = {cell.attrib.get("id", "") for cell in model.findall(".//mxCell[@edge='1']")}
+        numbered_children: set[str] = set()
+        for cell in model.findall(".//mxCell[@vertex='1']"):
+            style = cell.attrib.get("style", "")
+            value = cell.attrib.get("value", "")
+            parent = cell.attrib.get("parent", "")
+            if "edgeLabel" in style and parent in edge_ids:
+                numbered_children.add(parent)
+                continue
+            if "ellipse" in style and value.isdigit():
+                issues.append(
+                    VisualQaIssue(
+                        "error",
+                        f"Orphan numbered badge ellipse {cell.attrib.get('id')}: numbering must be an edge label riding the route",
+                        page_name,
+                        cell.attrib.get("id"),
+                    )
+                )
+
         connected_ids: set[str] = set()
         for edge in model.findall(".//mxCell[@edge='1']"):
             value = edge.attrib.get("value", "")
@@ -216,8 +237,15 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
                 connected_ids.add(target)
             if len(value) > MAX_EDGE_LABEL_CHARS and not value.isdigit():
                 issues.append(VisualQaIssue("warning", f"Long edge label should move to legend: {value}", page_name, edge.attrib.get("id")))
-            if value.isdigit() and value not in badge_values:
-                issues.append(VisualQaIssue("warning", f"Missing numbered badge for edge label {value}", page_name, edge.attrib.get("id")))
+            if value.isdigit() and edge.attrib.get("id") in numbered_children:
+                issues.append(
+                    VisualQaIssue(
+                        "error",
+                        f"Double numbering on edge {edge.attrib.get('id')}: digit value plus numbered child label",
+                        page_name,
+                        edge.attrib.get("id"),
+                    )
+                )
 
         is_executive_page = page_name.strip().lower().startswith("executive")
         for box in content_boxes:
@@ -274,7 +302,7 @@ def render_visual_qa(
     if xml_error_count:
         lines.append(f"- [error] draw.io XML validation reported {xml_error_count} error(s); see stderr/quality-checklist.")
     if not issues and not xml_error_count:
-        lines.append("- [x] No static overlap, off-canvas, unreadable text, long edge label, or missing badge warnings found.")
+        lines.append("- [x] No static overlap, off-canvas, unreadable text, long edge label, or numbering-mechanism findings.")
     else:
         for issue in issues:
             page = f" ({issue.page})" if issue.page else ""
