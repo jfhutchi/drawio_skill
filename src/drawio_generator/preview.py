@@ -137,6 +137,7 @@ def build_scene(page_name: str, diagram: Diagram) -> PageScene:
 
 _GLYPH_FILL_RE = re.compile(r"fillColor=(#[0-9a-fA-F]{6})")
 _GLYPH_SHAPE_RE = re.compile(r"shape=([A-Za-z0-9_.]+)")
+_GLYPH_IMAGE_RE = re.compile(r"image=[^;]*/([A-Za-z0-9_]+)\.svg")
 
 _VENDOR_MONOGRAMS = {"azure": "Az", "aws": "AWS", "gcp": "GCP", "kubernetes": "K8s"}
 _SHAPE_MONOGRAMS = {
@@ -149,6 +150,7 @@ _SHAPE_MONOGRAMS = {
     "cloud": "OBJ",
     "mxgraph.basic.queue": "MQ",
     "mxgraph.cisco19.rect": "SRV",
+    "mxgraph.weblogos.github": "GH",
 }
 
 
@@ -168,12 +170,16 @@ def _glyph_marker(glyph_style: str, vendor: str | None) -> tuple[str, str]:
         fill = fill_match.group(1)
     else:
         fill = _VENDOR_BRAND_FILLS.get(vendor or "", "#6c757d")
-    if vendor in _VENDOR_MONOGRAMS:
-        return fill, _VENDOR_MONOGRAMS[vendor]
     shape_match = _GLYPH_SHAPE_RE.search(glyph_style)
     token = shape_match.group(1) if shape_match else ""
     if token in _SHAPE_MONOGRAMS:
         return fill, _SHAPE_MONOGRAMS[token]
+    if vendor in _VENDOR_MONOGRAMS:
+        return fill, _VENDOR_MONOGRAMS[vendor]
+    if not token:
+        image_match = _GLYPH_IMAGE_RE.search(glyph_style)
+        if image_match:
+            return fill, image_match.group(1)[:2].upper()
     short = token.rsplit(".", 1)[-1]
     return fill, (short[:2].upper() or "??")
 

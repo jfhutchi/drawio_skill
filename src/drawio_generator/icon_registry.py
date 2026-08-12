@@ -408,6 +408,31 @@ def card_style(category: str, has_glyph: bool) -> str:
     )
 
 
+# Brand glyphs for non-cloud tools that diagrams.net actually bundles,
+# verified in a live app.diagrams.net instance (2026-08-12):
+# mxgraph.weblogos.github is a registered stencil; mscae/Docker.svg serves
+# HTTP 200 with SVG content. Terraform, Prometheus, Grafana, Jenkins,
+# GitLab, Ansible, Kafka, Helm, and ArgoCD have no bundled artwork in
+# diagrams.net (all probed 404/unregistered) - those tools keep a clean
+# card; a licensed icon pack under stencils/<vendor>/manifest.json is the
+# supported way to add their logos.
+_TOOL_GLYPHS: tuple[tuple[str, str], ...] = (
+    ("github", "shape=mxgraph.weblogos.github;html=1;fillColor=#181717;strokeColor=none;"),
+    ("docker", "image;sketch=0;aspect=fixed;html=1;points=[];align=center;image=img/lib/mscae/Docker.svg;"),
+)
+
+
+def _tool_glyph(*candidates: str | None) -> str | None:
+    for candidate in candidates:
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        for needle, style in _TOOL_GLYPHS:
+            if needle in lowered:
+                return style
+    return None
+
+
 def _glyph_style(resolved_style: str) -> str | None:
     """Turn a resolved shape style into a fixed-size glyph-child style.
 
@@ -441,7 +466,9 @@ def get_node_visual(
     """
 
     resolved = get_icon_style(node_type, icon, label)
-    glyph = _glyph_style(resolved.drawio_style)
+    # A tool's own brand mark (GitHub, Docker) beats a generic shape glyph.
+    tool = _tool_glyph(icon, label)
+    glyph = _glyph_style(tool) if tool is not None else _glyph_style(resolved.drawio_style)
     return NodeVisual(
         card_style=card_style(resolved.category, glyph is not None),
         glyph_style=glyph,

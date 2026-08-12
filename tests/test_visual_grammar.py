@@ -117,6 +117,25 @@ class VisualGrammarTests(unittest.TestCase):
         self.assertIsNone(plain.glyph_style)
         self.assertNotIn("spacingRight", plain.card_style)
 
+    def test_bundled_tool_brand_glyphs(self):
+        # GitHub and Docker have artwork bundled with diagrams.net (verified
+        # live); they get their brand mark even though they are not cloud
+        # vendor services.
+        github = get_node_visual("process", None, "GitHub Actions")
+        self.assertIsNotNone(github.glyph_style)
+        self.assertIn("mxgraph.weblogos.github", github.glyph_style)
+        self.assertIn("aspect=fixed", github.glyph_style)
+
+        repo = get_node_visual("repository", None, "GitHub Repository")
+        self.assertIn("mxgraph.weblogos.github", repo.glyph_style)
+
+        docker = get_node_visual("container", None, "Docker")
+        self.assertIn("image=img/lib/mscae/Docker.svg", docker.glyph_style)
+
+        # Tools with no bundled artwork honestly keep a clean card.
+        for label, node_type in (("Terraform", "terraform"), ("Prometheus", "monitoring"), ("Grafana", "dashboard")):
+            self.assertIsNone(get_node_visual(node_type, None, label).glyph_style, label)
+
     def test_category_strokes_match_theme_strokes(self):
         theme = json.loads(
             (REPO_ROOT / "templates" / "default-enterprise-theme.json").read_text(encoding="utf-8")
