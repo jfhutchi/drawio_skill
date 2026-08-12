@@ -9,7 +9,14 @@ from typing import Any
 
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
 from .icon_registry import get_icon_style
-from .layout_engine import apply_layout
+from .layout_engine import apply_layout, route_midpoint, _snap_down, _snap_up
+
+
+LEGEND_WIDTH = 320
+LEGEND_FONT_SIZE = 12
+NOTES_WIDTH = 760
+FURNITURE_GAP = 40
+SIDE_LEGEND_BUDGET = 1654  # A3 landscape width; beyond this the legend drops to the bottom band
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,30 +37,86 @@ class PageFurniture:
     notes: FurnitureBox | None
 
 
-def compute_furniture(diagram: Diagram) -> PageFurniture:
-    """Compute title, legend, and page-notes geometry for a laid-out page.
+def _content_bbox(diagram: Diagram) -> tuple[int, int, int, int]:
+    """Bounding box of laid-out content: boundaries, nodes, and planned routes."""
 
-    Single source of truth shared by the XML emitter and the preview renderer.
+    xs: list[float] = []
+    ys: list[float] = []
+    for boundary in diagram.boundaries:
+        if boundary.x is None or boundary.y is None:
+            continue
+        xs.extend((boundary.x, boundary.x + boundary.width))
+        ys.extend((boundary.y, boundary.y + boundary.height))
+    for node in diagram.nodes:
+        xs.extend((node.x or 0, (node.x or 0) + node.width))
+        ys.extend((node.y or 0, (node.y or 0) + node.height))
+    for edge in diagram.edges:
+        route = edge.metadata.get("route")
+        if isinstance(route, list):
+            for point in route:
+                xs.append(float(point[0]))
+                ys.append(float(point[1]))
+    if not xs:
+        return (40, 120, 1080, 700)
+    return (_snap_down(min(xs)), _snap_down(min(ys)), _snap_up(max(xs)), _snap_up(max(ys)))
+
+
+def _estimate_wrapped_lines(text: str, box_width: int, font_size: int) -> int:
+    """Line-count estimate using the shared 0.6 * fontSize glyph width metric."""
+
+    max_chars = max(4, int(box_width / (0.6 * font_size)))
+    lines = 0
+    for raw_line in text.split("\n"):
+        lines += max(1, -(-len(raw_line) // max_chars))
+    return lines
+
+
+def compute_furniture(diagram: Diagram) -> PageFurniture:
+    """Place title, legend, and page notes from the laid-out content extents.
+
+    No fixed coordinates: the title band spans the content width at the top,
+    the legend sits right of the content when it fits the page budget and
+    drops into the bottom band beside the notes otherwise. Single source of
+    truth shared by the XML emitter and the preview renderer.
     """
 
-    _, page_height = _page_size(diagram)
+    min_x, min_y, max_x, max_y = _content_bbox(diagram)
     title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
-    title = FurnitureBox(40, 30, 850, 60, title_value)
+    title = FurnitureBox(min_x, 30, max(400, max_x - min_x), 60, title_value)
 
-    legend: FurnitureBox | None = None
-    rows = [
+    legend_rows = [
         "Legend",
         *[f"{item.label}: {item.meaning}" for item in diagram.legends],
         *_flow_legend_rows(diagram.edges),
     ]
-    if len(rows) > 1:
-        legend = FurnitureBox(900, 30, 320, 45 + len(rows) * 24, "\n".join(rows))
+    legend_text = "\n".join(legend_rows)
+    legend_height = 20 + sum(
+        _estimate_wrapped_lines(row, LEGEND_WIDTH - 16, LEGEND_FONT_SIZE) for row in legend_rows
+    ) * 22
+    legend_height = _snap_up(legend_height)
+
+    notes_lines = [str(note) for note in diagram.metadata.get("page_notes") or [] if str(note).strip()]
+    bottom_y = _snap_up(max_y + FURNITURE_GAP)
+
+    legend: FurnitureBox | None = None
+    legend_at_side = False
+    if len(legend_rows) > 1:
+        side_x = _snap_up(max_x + FURNITURE_GAP)
+        legend_at_side = side_x + LEGEND_WIDTH + FURNITURE_GAP <= SIDE_LEGEND_BUDGET
+        if legend_at_side:
+            legend = FurnitureBox(side_x, max(30, min_y), LEGEND_WIDTH, legend_height, legend_text)
 
     notes: FurnitureBox | None = None
-    page_notes = diagram.metadata.get("page_notes")
-    if isinstance(page_notes, list) and page_notes:
-        value = "Page notes\n" + "\n".join(str(note) for note in page_notes)
-        notes = FurnitureBox(40, max(120, page_height - 105), 760, 45 + len(page_notes) * 22, value)
+    if notes_lines:
+        notes_text = "Page notes\n" + "\n".join(notes_lines)
+        notes_height = _snap_up(
+            20 + sum(_estimate_wrapped_lines(line, NOTES_WIDTH - 16, LEGEND_FONT_SIZE) for line in ["Page notes", *notes_lines]) * 22
+        )
+        notes = FurnitureBox(min_x, bottom_y, NOTES_WIDTH, notes_height, notes_text)
+
+    if len(legend_rows) > 1 and not legend_at_side:
+        legend_x = min_x + NOTES_WIDTH + FURNITURE_GAP if notes is not None else min_x
+        legend = FurnitureBox(legend_x, bottom_y, LEGEND_WIDTH, legend_height, legend_text)
 
     return PageFurniture(title, legend, notes)
 
@@ -130,7 +193,8 @@ def _renumber_edges_per_page(diagram: Diagram) -> None:
 
 def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> None:
     laid_out = diagram if diagram.metadata.get("_laid_out") else apply_layout(diagram)
-    page_width, page_height = _page_size(laid_out)
+    furniture = compute_furniture(laid_out)
+    page_width, page_height = _page_size(laid_out, furniture)
     page = ET.SubElement(mxfile, "diagram", {"name": page_name})
     model = ET.SubElement(
         page,
@@ -157,12 +221,12 @@ def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> N
     ET.SubElement(root, "mxCell", {"id": "0"})
     ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
 
-    furniture = compute_furniture(laid_out)
+    boundary_by_id = {boundary.id: boundary for boundary in laid_out.boundaries}
     _add_title(root, laid_out, furniture.title)
     for boundary in laid_out.boundaries:
         _add_boundary(root, boundary)
     for node in laid_out.nodes:
-        _add_node(root, node)
+        _add_node(root, node, boundary_by_id.get(node.group or ""))
     if furniture.legend is not None:
         _add_legend(root, laid_out, furniture.legend)
     for edge in laid_out.edges:
@@ -228,29 +292,18 @@ def _prefix_diagram_ids(diagram: Diagram, prefix: str) -> Diagram:
     return prefixed
 
 
-def _page_size(diagram: Diagram) -> tuple[int, int]:
-    max_x = 1169
-    max_y = 827
-    for boundary in diagram.boundaries:
-        max_x = max(max_x, (boundary.x or 0) + boundary.width + 80)
-        max_y = max(max_y, (boundary.y or 0) + boundary.height + 80)
-    for node in diagram.nodes:
-        max_x = max(max_x, (node.x or 0) + node.width + 80)
-        max_y = max(max_y, (node.y or 0) + node.height + 80)
-    for edge in diagram.edges:
-        route = edge.metadata.get("route")
-        if isinstance(route, list):
-            for point in route:
-                max_x = max(max_x, int(point[0]) + 80)
-                max_y = max(max_y, int(point[1]) + 80)
-    legend_rows = ["Legend", *diagram.legends, *_flow_legend_rows(diagram.edges)]
-    if len(legend_rows) > 1:
-        max_x = max(max_x, 1300)
-        max_y = max(max_y, 105 + len(legend_rows) * 24)
-    page_notes = diagram.metadata.get("page_notes")
-    if isinstance(page_notes, list) and page_notes:
-        max_y = max(max_y, 185 + len(page_notes) * 24)
-    return max_x, max_y
+def _page_size(diagram: Diagram, furniture: PageFurniture | None = None) -> tuple[int, int]:
+    if furniture is None:
+        furniture = compute_furniture(diagram)
+    _, _, content_max_x, content_max_y = _content_bbox(diagram)
+    max_x = content_max_x + 80
+    max_y = content_max_y + 80
+    for box in (furniture.title, furniture.legend, furniture.notes):
+        if box is None:
+            continue
+        max_x = max(max_x, box.x + box.width + 40)
+        max_y = max(max_y, box.y + box.height + 40)
+    return max(1169, _snap_up(max_x)), max(827, _snap_up(max_y))
 
 
 def _page_name(title: str) -> str:
@@ -290,14 +343,19 @@ def _add_title(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
 
 
 def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
-    style = _boundary_style(boundary)
+    """Emit a boundary as a genuine draw.io container with a title strip.
+
+    Dragging the boundary in draw.io moves its member nodes because members
+    carry parent=<boundary_id> with container-relative geometry.
+    """
+
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": boundary.id,
             "value": _drawio_value(boundary.label),
-            "style": style,
+            "style": _boundary_style(boundary),
             "vertex": "1",
             "parent": "1",
         },
@@ -315,10 +373,17 @@ def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
     )
 
 
-def _add_node(root: ET.Element, node: Node) -> None:
+def _add_node(root: ET.Element, node: Node, boundary: Boundary | None = None) -> None:
     style = get_icon_style(node.node_type, node.icon, node.label).drawio_style
     if node.risk_level and node.risk_level.lower() in {"high", "critical"}:
         style += "strokeColor=#b85450;strokeWidth=2;"
+    x = node.x if node.x is not None else 80
+    y = node.y if node.y is not None else 160
+    parent = "1"
+    if boundary is not None and boundary.x is not None and boundary.y is not None:
+        parent = boundary.id
+        x -= boundary.x
+        y -= boundary.y
     cell = ET.SubElement(
         root,
         "mxCell",
@@ -327,15 +392,15 @@ def _add_node(root: ET.Element, node: Node) -> None:
             "value": _drawio_value(node.label),
             "style": style,
             "vertex": "1",
-            "parent": "1",
+            "parent": parent,
         },
     )
     ET.SubElement(
         cell,
         "mxGeometry",
         {
-            "x": str(node.x if node.x is not None else 80),
-            "y": str(node.y if node.y is not None else 160),
+            "x": str(x),
+            "y": str(y),
             "width": str(node.width),
             "height": str(node.height),
             "as": "geometry",
@@ -393,12 +458,14 @@ def _add_flow_badges(root: ET.Element, diagram: Diagram) -> None:
 
 def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, value: str, cell_prefix: str = "") -> None:
     size = 28
-    source_x = (source.x or 0) + source.width
-    source_y = (source.y or 0) + source.height // 2
-    target_x = target.x or 0
-    target_y = (target.y or 0) + target.height // 2
-    x = max(30, (source_x + target_x) // 2 - size // 2)
-    y = max(30, (source_y + target_y) // 2 - size // 2)
+    route = edge.metadata.get("route")
+    if isinstance(route, list) and len(route) >= 2:
+        mid_x, mid_y = route_midpoint([(float(px), float(py)) for px, py in route])
+    else:
+        mid_x = ((source.x or 0) + source.width + (target.x or 0)) / 2
+        mid_y = ((source.y or 0) + source.height // 2 + (target.y or 0) + target.height // 2) / 2
+    x = max(30, int(mid_x) - size // 2)
+    y = max(30, int(mid_y) - size // 2)
     fill = _flow_color(edge)
     cell = ET.SubElement(
         root,
@@ -457,9 +524,10 @@ def _boundary_style(boundary: Boundary) -> str:
     stroke = "#dc2626" if boundary_type in {"trust", "security"} else "#6c757d"
     fill = "#fffafa" if boundary_type in {"trust", "security"} else "#f8fbff"
     return (
-        "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;"
-        f"fillColor={fill};strokeColor={stroke};verticalAlign=top;align=left;"
-        "spacingTop=10;spacingLeft=12;fontStyle=1;fontColor=#343a40;"
+        "swimlane;html=1;rounded=1;startSize=32;container=1;collapsible=0;"
+        "dashed=1;dashPattern=8 4;whiteSpace=wrap;"
+        f"fillColor={fill};swimlaneFillColor={fill};strokeColor={stroke};"
+        "align=left;spacingLeft=12;fontStyle=1;fontColor=#343a40;fontSize=13;"
     )
 
 

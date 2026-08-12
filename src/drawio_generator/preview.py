@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .diagram_model import Diagram, Edge, Node
 from .drawio_xml import compute_furniture, _edge_value, _flow_color, _page_size
+from .layout_engine import route_midpoint
 
 CHAR_WIDTH_FACTOR = 0.6  # estimated glyph width = 0.6 * fontSize
 LINE_HEIGHT_FACTOR = 1.35
@@ -178,7 +179,7 @@ def _add_edge_shapes(shapes: list[Shape], edge: Edge, nodes_by_id: dict[str, Nod
     shapes.append(Shape("polygon", "edge-arrow", _arrow_head(points[-2], points[-1]), fill=color))
     label = str(_edge_value(edge))
     if label:
-        mid = _route_midpoint(points)
+        mid = route_midpoint(points)
         shapes.append(
             Shape(
                 "text",
@@ -201,23 +202,6 @@ def _arrow_head(before: tuple[float, float], tip: tuple[float, float]) -> tuple[
     left = (tip[0] - ARROW_SIZE * ux + ARROW_SIZE * 0.5 * uy, tip[1] - ARROW_SIZE * uy - ARROW_SIZE * 0.5 * ux)
     right = (tip[0] - ARROW_SIZE * ux - ARROW_SIZE * 0.5 * uy, tip[1] - ARROW_SIZE * uy + ARROW_SIZE * 0.5 * ux)
     return (tip, left, right)
-
-
-def _route_midpoint(points: list[tuple[float, float]]) -> tuple[float, float]:
-    """Point halfway along the polyline's total length."""
-
-    segments = list(zip(points, points[1:]))
-    total = sum(((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5 for (ax, ay), (bx, by) in segments)
-    if total <= 0:
-        return points[0]
-    remaining = total / 2.0
-    for (ax, ay), (bx, by) in segments:
-        seg_len = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
-        if seg_len >= remaining and seg_len > 0:
-            t = remaining / seg_len
-            return (ax + (bx - ax) * t, ay + (by - ay) * t)
-        remaining -= seg_len
-    return points[-1]
 
 
 def _add_furniture_shapes(shapes: list[Shape], diagram: Diagram) -> None:

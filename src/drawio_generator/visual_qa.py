@@ -133,9 +133,10 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
             continue
         page_width = _float_attr(model, "pageWidth", 1169)
         page_height = _float_attr(model, "pageHeight", 827)
-        boxes = [_box_from_cell(cell) for cell in model.findall(".//mxCell[@vertex='1']")]
-        boxes = [box for box in boxes if box is not None]
-        content_boxes = [box for box in boxes if _is_content_box(box)]
+        boxes = _absolute_boxes(model)
+        content_boxes = [box for box in boxes if _box_kind(box) == "content"]
+        furniture_boxes = [box for box in boxes if _box_kind(box) == "furniture"]
+        boundary_boxes = [box for box in boxes if _box_kind(box) == "boundary"]
 
         for box in content_boxes:
             if box.x < 0 or box.y < 0 or box.right > page_width or box.bottom > page_height:
@@ -150,6 +151,54 @@ def analyze_drawio_xml(xml_text: str) -> list[VisualQaIssue]:
                         VisualQaIssue(
                             "warning",
                             f"Node overlap: {first.label or first.item_id} overlaps {second.label or second.item_id}",
+                            page_name,
+                            first.item_id,
+                        )
+                    )
+
+        # Furniture (title, legend, notes, badges) must never sit on content.
+        for furniture in furniture_boxes:
+            for box in content_boxes:
+                if _boxes_overlap(furniture, box, slack=0):
+                    issues.append(
+                        VisualQaIssue(
+                            "warning",
+                            f"Furniture overlap: {furniture.item_id} covers {box.label or box.item_id}",
+                            page_name,
+                            furniture.item_id,
+                        )
+                    )
+            if "__badge_" in furniture.item_id:
+                continue  # badges ride edge routes, which legitimately run inside boundaries
+            for boundary in boundary_boxes:
+                if _boxes_overlap(furniture, boundary, slack=0):
+                    issues.append(
+                        VisualQaIssue(
+                            "warning",
+                            f"Furniture overlap: {furniture.item_id} covers boundary {boundary.label or boundary.item_id}",
+                            page_name,
+                            furniture.item_id,
+                        )
+                    )
+        for first_index, first in enumerate(furniture_boxes):
+            for second in furniture_boxes[first_index + 1:]:
+                if _boxes_overlap(first, second):
+                    issues.append(
+                        VisualQaIssue(
+                            "warning",
+                            f"Furniture overlap: {first.item_id} overlaps {second.item_id}",
+                            page_name,
+                            first.item_id,
+                        )
+                    )
+
+        for first_index, first in enumerate(boundary_boxes):
+            for second in boundary_boxes[first_index + 1:]:
+                if _boxes_overlap(first, second, slack=0):
+                    issues.append(
+                        VisualQaIssue(
+                            "error",
+                            f"Boundary overlap: {first.label or first.item_id} overlaps {second.label or second.item_id}",
                             page_name,
                             first.item_id,
                         )
@@ -234,37 +283,72 @@ def render_visual_qa(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _box_from_cell(cell: ET.Element) -> _Box | None:
-    geometry = cell.find("mxGeometry")
-    if geometry is None:
-        return None
-    return _Box(
-        item_id=cell.attrib.get("id", ""),
-        label=cell.attrib.get("value", ""),
-        x=_float_attr(geometry, "x", 0),
-        y=_float_attr(geometry, "y", 0),
-        width=_float_attr(geometry, "width", 0),
-        height=_float_attr(geometry, "height", 0),
-        style=cell.attrib.get("style", ""),
-    )
+def _absolute_boxes(model: ET.Element) -> list[_Box]:
+    """Vertex boxes with container-relative geometry resolved to page coordinates."""
+
+    cells = model.findall(".//mxCell")
+    parents = {cell.attrib.get("id", ""): cell.attrib.get("parent", "") for cell in cells}
+    origins: dict[str, tuple[float, float]] = {}
+    raw: dict[str, tuple[float, float]] = {}
+    for cell in cells:
+        geometry = cell.find("mxGeometry")
+        if geometry is not None:
+            raw[cell.attrib.get("id", "")] = (_float_attr(geometry, "x", 0), _float_attr(geometry, "y", 0))
+
+    def origin(cell_id: str, depth: int = 0) -> tuple[float, float]:
+        if cell_id in {"", "0", "1"} or depth > 10:
+            return (0.0, 0.0)
+        if cell_id in origins:
+            return origins[cell_id]
+        parent_x, parent_y = origin(parents.get(cell_id, ""), depth + 1)
+        own_x, own_y = raw.get(cell_id, (0.0, 0.0))
+        origins[cell_id] = (parent_x + own_x, parent_y + own_y)
+        return origins[cell_id]
+
+    boxes: list[_Box] = []
+    for cell in cells:
+        if cell.attrib.get("vertex") != "1":
+            continue
+        geometry = cell.find("mxGeometry")
+        if geometry is None:
+            continue
+        cell_id = cell.attrib.get("id", "")
+        parent_x, parent_y = origin(parents.get(cell_id, ""))
+        boxes.append(
+            _Box(
+                item_id=cell_id,
+                label=cell.attrib.get("value", ""),
+                x=parent_x + _float_attr(geometry, "x", 0),
+                y=parent_y + _float_attr(geometry, "y", 0),
+                width=_float_attr(geometry, "width", 0),
+                height=_float_attr(geometry, "height", 0),
+                style=cell.attrib.get("style", ""),
+            )
+        )
+    return boxes
 
 
-def _is_content_box(box: _Box) -> bool:
-    if box.item_id in {"0", "1"} or box.item_id.endswith("__title") or box.item_id.endswith("__legend"):
-        return False
-    if "__badge_" in box.item_id or box.item_id.endswith("__page_notes"):
-        return False
-    if "dashed=1" in box.style and "verticalAlign=top" in box.style:
-        return False
-    if box.width <= 0 or box.height <= 0:
-        return False
-    return True
+def _box_kind(box: _Box) -> str:
+    """Classify a vertex: boundary container, page furniture, or content node."""
+
+    if box.item_id in {"0", "1"} or box.width <= 0 or box.height <= 0:
+        return "ignore"
+    if (
+        box.item_id.endswith("__title")
+        or box.item_id.endswith("__legend")
+        or box.item_id.endswith("__page_notes")
+        or "__badge_" in box.item_id
+    ):
+        return "furniture"
+    if "swimlane" in box.style or ("dashed=1" in box.style and "verticalAlign=top" in box.style):
+        return "boundary"
+    return "content"
 
 
-def _boxes_overlap(first: _Box, second: _Box) -> bool:
+def _boxes_overlap(first: _Box, second: _Box, slack: float = 12) -> bool:
     x_overlap = min(first.right, second.right) - max(first.x, second.x)
     y_overlap = min(first.bottom, second.bottom) - max(first.y, second.y)
-    return x_overlap > 12 and y_overlap > 12
+    return x_overlap > slack and y_overlap > slack
 
 
 def _float_attr(element: ET.Element, name: str, default: float) -> float:

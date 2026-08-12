@@ -237,6 +237,25 @@ def _snap_up(value: float) -> int:
     return -_snap_down(-value)
 
 
+def route_midpoint(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """Point halfway along a polyline's total length."""
+
+    if not points:
+        return (0.0, 0.0)
+    segments = list(zip(points, points[1:]))
+    total = sum(((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5 for (ax, ay), (bx, by) in segments)
+    if total <= 0:
+        return points[0]
+    remaining = total / 2.0
+    for (ax, ay), (bx, by) in segments:
+        seg_len = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+        if seg_len >= remaining and seg_len > 0:
+            t = remaining / seg_len
+            return (ax + (bx - ax) * t, ay + (by - ay) * t)
+        remaining -= seg_len
+    return points[-1]
+
+
 @dataclass(frozen=True, slots=True)
 class _Axis:
     """Maps flow/cross space onto page x/y. Horizontal: flow = x."""
