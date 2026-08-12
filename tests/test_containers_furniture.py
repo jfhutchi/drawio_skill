@@ -90,20 +90,29 @@ class ContainerAndFurnitureTests(unittest.TestCase):
                 self.assertIn("startSize=32", style)
 
     def test_furniture_is_placed_after_content_not_at_fixed_coordinates(self):
-        # The legend must sit right of the content extents, not at hardcoded x=900.
+        # The legend must sit right of the content extents or in the bottom
+        # band below them - never at the old hardcoded (900, 30) on top of
+        # content.
         page = self.root.findall("diagram")[0]
         model = page.find("mxGraphModel")
         legend = next(
             cell for cell in model.findall(".//mxCell") if cell.attrib.get("id", "").endswith("__legend")
         )
-        legend_x = float(legend.find("mxGeometry").attrib["x"])
+        legend_geometry = legend.find("mxGeometry")
+        legend_x = float(legend_geometry.attrib["x"])
+        legend_y = float(legend_geometry.attrib["y"])
         content_right = 0.0
+        content_bottom = 0.0
         for cell in model.findall(".//mxCell"):
             if "swimlane" not in cell.attrib.get("style", ""):
                 continue
             geometry = cell.find("mxGeometry")
             content_right = max(content_right, float(geometry.attrib["x"]) + float(geometry.attrib["width"]))
-        self.assertGreaterEqual(legend_x, content_right)
+            content_bottom = max(content_bottom, float(geometry.attrib["y"]) + float(geometry.attrib["height"]))
+        self.assertTrue(
+            legend_x >= content_right or legend_y >= content_bottom,
+            f"legend at ({legend_x}, {legend_y}) sits on content ({content_right}, {content_bottom})",
+        )
 
 
 if __name__ == "__main__":

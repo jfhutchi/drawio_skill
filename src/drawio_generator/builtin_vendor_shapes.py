@@ -79,6 +79,8 @@ _AZURE_SHAPES: dict[str, str] = {
     "front door": "front_doors",
     "azure application gateway": "application_gateways",
     "application gateway": "application_gateways",
+    "application gateway waf": "application_gateways",
+    "azure application gateway waf": "application_gateways",
     "azure load balancer": "load_balancers",
     "azure traffic manager": "traffic_manager_profiles",
     "traffic manager": "traffic_manager_profiles",

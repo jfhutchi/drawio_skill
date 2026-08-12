@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
@@ -108,10 +109,7 @@ ALIASES: dict[str, str] = {
     "jenkins": "process",
     "prometheus": "monitoring",
     "grafana": "dashboard",
-    "log analytics": "logging",
     "opentelemetry collector": "monitoring",
-    "application gateway": "gateway",
-    "azure front door": "cdn",
     "excel": "workbook",
     "excel workbook": "workbook",
     "workbook": "workbook",
@@ -336,6 +334,32 @@ def get_icon_style(
     if fallback_vendor:
         return _with_vendor(IconStyle("fallback", DEFAULT_STYLE, "Component"), fallback_vendor)
     return IconStyle("fallback", DEFAULT_STYLE, "Component")
+
+
+_VENDOR_LABEL_PREFIXES = ("azure ", "aws ", "amazon ", "google cloud ", "gcp ", "microsoft ")
+
+
+def canonical_component_key(label: str) -> str:
+    """Canonical identity for a component label, for synonym-safe dedupe.
+
+    Two labels that resolve to the same built-in vendor stencil are the same
+    component ("Application Gateway WAF" == "Azure Application Gateway").
+    Unrecognized labels fall back to a vendor-prefix-stripped slug so
+    "Azure Foo" and "Foo" still merge.
+    """
+
+    lowered = " ".join(label.strip().lower().split())
+    for vendor in ("azure", "aws", "gcp", "kubernetes"):
+        match = builtin_vendor_shapes.lookup(vendor, lowered)
+        if match is not None:
+            return f"{vendor}:{match.drawio_style}"
+    stripped = lowered
+    for prefix in _VENDOR_LABEL_PREFIXES:
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
+    slug = re.sub(r"[^a-z0-9]+", "-", stripped).strip("-")
+    return f"label:{slug or lowered}"
 
 
 CARD_FILL = "#ffffff"

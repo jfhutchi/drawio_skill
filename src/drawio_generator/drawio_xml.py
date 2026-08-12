@@ -291,18 +291,42 @@ def _prefix_diagram_ids(diagram: Diagram, prefix: str) -> Diagram:
     return prefixed
 
 
+A4_LANDSCAPE = (1169, 826)
+A3_LANDSCAPE = (1654, 1169)
+
+
 def _page_size(diagram: Diagram, furniture: PageFurniture | None = None) -> tuple[int, int]:
+    """Smallest standard landscape page (A4 -> A3) that fits content + margins.
+
+    Only exceeds A3 when the content genuinely requires it (the CLI notes
+    oversized pages in render-qa.md via page_size_notes).
+    """
+
     if furniture is None:
         furniture = compute_furniture(diagram)
     _, _, content_max_x, content_max_y = _content_bbox(diagram)
-    max_x = content_max_x + 80
-    max_y = content_max_y + 80
+    needed_x = content_max_x + 40
+    needed_y = content_max_y + 40
     for box in (furniture.title, furniture.legend, furniture.notes):
         if box is None:
             continue
-        max_x = max(max_x, box.x + box.width + 40)
-        max_y = max(max_y, box.y + box.height + 40)
-    return max(1169, _snap_up(max_x)), max(827, _snap_up(max_y))
+        needed_x = max(needed_x, box.x + box.width + 40)
+        needed_y = max(needed_y, box.y + box.height + 40)
+    for width, height in (A4_LANDSCAPE, A3_LANDSCAPE):
+        if needed_x <= width and needed_y <= height:
+            return (width, height)
+    return (max(A3_LANDSCAPE[0], _snap_up(needed_x)), max(A3_LANDSCAPE[1], _snap_up(needed_y)))
+
+
+def page_size_notes(pages: list[tuple[str, Diagram]]) -> list[str]:
+    """Human-readable notes for pages that exceed A3 landscape."""
+
+    notes: list[str] = []
+    for page_name, diagram in pages:
+        width, height = _page_size(diagram)
+        if (width, height) not in (A4_LANDSCAPE, A3_LANDSCAPE):
+            notes.append(f"Page '{page_name}' exceeds A3 landscape: {width}x{height}px required by content.")
+    return notes
 
 
 def _page_name(title: str) -> str:

@@ -67,6 +67,7 @@ ENTERPRISE_GROUP_ORDER = [
 
 AWS_GROUP_ORDER = [
     "boundary-aws-external",
+    "boundary-aws-devops",
     "boundary-aws-account",
     "boundary-aws-edge",
     "boundary-aws-compute",
@@ -77,6 +78,7 @@ AWS_GROUP_ORDER = [
 
 AZURE_GROUP_ORDER = [
     "boundary-azure-external",
+    "boundary-azure-devops",
     "boundary-azure-global",
     "boundary-azure-region-primary",
     "boundary-azure-region-secondary",
@@ -87,6 +89,7 @@ AZURE_GROUP_ORDER = [
 
 DATA_PLATFORM_GROUP_ORDER = [
     "boundary-data-sources",
+    "boundary-data-devops",
     "boundary-data-ingest",
     "boundary-data-process",
     "boundary-data-store",

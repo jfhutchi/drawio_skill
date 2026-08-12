@@ -488,9 +488,12 @@ def render_visual_qa(
     xml_error_count: int = 0,
     exports: list[RenderExport] | None = None,
     preview_paths: list[Path] | None = None,
+    size_notes: list[str] | None = None,
 ) -> str:
     renderer = renderer or detect_renderer()
     lines = [result_line(qa_error_count(issues, xml_error_count)), "", "# Render and Visual QA", ""]
+    for note in size_notes or []:
+        lines.append(f"- {note}")
     if renderer.available:
         lines.append(f"- Renderer available: {renderer.command}")
         if exports:

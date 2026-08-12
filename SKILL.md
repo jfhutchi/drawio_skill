@@ -202,7 +202,7 @@ Support at least these categories:
 - Data/messaging: PostgreSQL, SQL Server, MySQL, Oracle, Redis, Kafka, RabbitMQ, queues, event bus, object storage, file share, warehouse, data lake, backup, replication, ETL/ELT.
 - Observability/operations: Prometheus, Grafana, OpenTelemetry, Jaeger, Elastic, Splunk, log analytics, metrics, traces, alerts, incident management, runbooks, SLO/SLA, health checks, synthetic monitoring.
 
-If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. By default the helper resolves recognized Azure, AWS, GCP, and Kubernetes service names to real diagrams.net built-in vendor stencils (`mxgraph.azure.*`, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*`) — these ship with diagrams.net and require no proprietary icon pack. Unrecognized labels fall back to vendor-tagged generic shapes, and `validate_vendor_shape_accuracy` warns when a vendor-named node still resolves to a generic shape. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
+If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. The helper renders every node with one visual grammar: a near-white card with the label inside, and — when the service name resolves to a diagrams.net built-in vendor stencil (`mxgraph.azure.*`, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*`) — a fixed-size 40×40 glyph anchored to the card's top-right. Stencils are never stretched to node size. Unrecognized labels get a plain card, and `validate_vendor_shape_accuracy` warns when a vendor-named node resolves to no glyph. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
 
 Use icon-like visual cues for common enterprise review nodes: repository/folder for source control, controller/process for Tower/AWX, server for Linux/Windows targets, cylinder for databases, queue for RabbitMQ/Kafka, note/document for Excel workbooks and reports, vault/lock for secret stores, cloud/object for SFS or object storage, and actor/user shapes for consumers.
 
@@ -225,26 +225,14 @@ Prefer uncompressed XML unless compression is explicitly required. Human-readabl
 
 ## Validation Rules
 
-Before final response, validate:
+Run the helper with `--validate` and read `render-qa.md`. The code enforces the hard rules — XML structure, unique ids, edge references, geometry, overlap-free furniture, disjoint boundaries, grid-aligned coordinates, single numbering mechanism, monotonic numbered flows, route/node collisions, text fit, contrast, secret redaction — and exits 1 on any error-severity finding. Your job is the loop, not the checklist:
 
-- XML parseability.
-- Required draw.io structure.
-- Unique IDs.
-- Edge source/target existence.
-- Geometry presence.
-- Important labels are non-empty.
-- Busy edge labels are shortened or numbered with full descriptions moved to a legend.
-- Page 1 has enough spacing for nodes, labels, and routed arrows to avoid overlaps.
-- `page-plan.md` exists and separates executive content from detail, security, data/evidence, and operations content.
-- `visual-guide.md` exists and selects the reference visual pattern, layout rules, callout rules, and quality gates.
-- No raw secrets.
-- Output files exist.
-- Diagram summary exists.
-- Assumptions/unknowns exist.
-- Adversarial review exists.
-- Quality checklist exists.
+1. Generate with `--validate`.
+2. Read `render-qa.md` and **view `preview-page-1.svg`**.
+3. If `RESULT: FAIL`, fix the model and regenerate.
+4. Only report completion on `RESULT: PASS`.
 
-If validation fails, fix the model or XML. Do not tell the user it is complete until validation has been run and read.
+Degree-0 nodes are automatically parked in an "Unconfirmed components" tray on the Implementation Detail page (recorded in `assumptions.md`); give a node an edge if it belongs on page 1. Pages use the smallest standard landscape size that fits (A4, then A3); pages that must exceed A3 are noted in `render-qa.md`.
 
 ## Security and Redaction
 

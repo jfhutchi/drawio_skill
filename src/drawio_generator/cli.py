@@ -10,8 +10,9 @@ from pathlib import Path
 from . import preview
 from .adversarial_review import improve_diagram, render_adversarial_review, review_diagram
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .drawio_xml import build_page_diagrams, generate_multipage_drawio_xml
+from .drawio_xml import build_page_diagrams, generate_multipage_drawio_xml, page_size_notes
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
+from .icon_registry import canonical_component_key
 from .layout_engine import infer_layer
 from .model_io import ModelValidationError, load_model
 from .page_planner import build_page_plan, render_page_plan
@@ -67,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         final_findings = review_diagram(improved)
         visual_pattern = recommend_visual_pattern(improved, request)
         apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
+    _park_disconnected_nodes(improved)
     page_plan = build_page_plan(improved)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
@@ -97,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
             xml_error_count=len(xml_issues),
             exports=exports,
             preview_paths=preview_paths,
+            size_notes=page_size_notes(pages),
         ),
         encoding="utf-8",
     )
@@ -128,6 +131,37 @@ def _fill_model_gaps(diagram: Diagram) -> None:
             node.layer = infer_layer(node)
     for edge in diagram.edges:
         edge.metadata.setdefault("flow_type", _infer_flow_type(edge))
+
+
+UNCONFIRMED_BOUNDARY_ID = "boundary-unconfirmed"
+
+
+def _park_disconnected_nodes(diagram: Diagram) -> None:
+    """Degree-0 nodes never appear on page 1.
+
+    They are parked in an "Unconfirmed components" tray that the page planner
+    places on the Implementation Detail page, and each parking is recorded in
+    the assumptions. Skipped when the diagram has no edges at all (then the
+    whole diagram is intentionally unconnected).
+    """
+
+    if not diagram.edges:
+        return
+    connected = {edge.source for edge in diagram.edges} | {edge.target for edge in diagram.edges}
+    parked = [node for node in diagram.nodes if node.id not in connected]
+    if not parked:
+        return
+    if all(boundary.id != UNCONFIRMED_BOUNDARY_ID for boundary in diagram.boundaries):
+        diagram.boundaries.append(
+            Boundary(id=UNCONFIRMED_BOUNDARY_ID, label="Unconfirmed components", boundary_type="logical")
+        )
+    for node in parked:
+        node.group = UNCONFIRMED_BOUNDARY_ID
+        node.metadata = {**node.metadata, "detail_level": "detail"}
+        diagram.assumptions.append(
+            f"'{node.label}' was extracted with no relationship evidence; "
+            "parked in the Unconfirmed components tray on the Implementation Detail page."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -180,7 +214,7 @@ def detect_diagram_type(request: str) -> str:
 
 
 def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str, audience: str, layout: str | None) -> Diagram:
-    nodes = _dedupe_nodes(extraction.components)
+    nodes, id_map = _dedupe_nodes(extraction.components)
     if not nodes:
         nodes = [
             Node(id="user", label="User / External System", node_type="user"),
@@ -189,7 +223,8 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
         ]
     nodes = _apply_audience_filter(nodes, audience)
     boundaries = _build_boundaries(diagram_type, nodes, request)
-    edges = _build_edges(nodes, extraction.relationships)
+    relationships = _remap_relationships(extraction.relationships, id_map)
+    edges = _build_edges(nodes, relationships)
     title = _title_from_request(request, diagram_type)
     direction = layout or ("left-to-right" if diagram_type in {"enterprise", "cloud", "cicd", "workflow", "code"} else "top-to-bottom")
     _assign_node_groups(nodes, boundaries, diagram_type)
@@ -222,10 +257,32 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
     return diagram
 
 
-def _dedupe_nodes(nodes: list[Node]) -> list[Node]:
-    seen: set[str] = set()
+def _dedupe_nodes(nodes: list[Node]) -> tuple[list[Node], dict[str, str]]:
+    """Dedupe components on canonical vendor identity, not raw label text.
+
+    "Application Gateway WAF" and "Azure Application Gateway" resolve to the
+    same built-in stencil, so they are one node; the most specific (longest)
+    label wins. Returns the surviving nodes plus original-id -> kept-id map
+    so extracted relationships can follow the merge.
+    """
+
+    by_key: dict[str, Node] = {}
+    mapping: list[tuple[str, Node]] = []
     deduped: list[Node] = []
     for node in nodes:
+        key = canonical_component_key(node.label)
+        kept = by_key.get(key)
+        if kept is None:
+            by_key[key] = node
+            deduped.append(node)
+            mapping.append((node.id, node))
+            continue
+        if len(node.label) > len(kept.label):
+            kept.label = node.label
+        mapping.append((node.id, kept))
+
+    seen: set[str] = set()
+    for node in deduped:
         base = node.id
         candidate = base
         counter = 2
@@ -234,8 +291,17 @@ def _dedupe_nodes(nodes: list[Node]) -> list[Node]:
             counter += 1
         node.id = candidate
         seen.add(candidate)
-        deduped.append(node)
-    return deduped
+    return deduped, {original: kept.id for original, kept in mapping}
+
+
+def _remap_relationships(relationships: list[Edge], id_map: dict[str, str]) -> list[Edge]:
+    remapped: list[Edge] = []
+    for edge in relationships:
+        edge.source = id_map.get(edge.source, edge.source)
+        edge.target = id_map.get(edge.target, edge.target)
+        if edge.source != edge.target:
+            remapped.append(edge)
+    return remapped
 
 
 def _apply_audience_filter(nodes: list[Node], audience: str) -> list[Node]:
@@ -267,6 +333,7 @@ def _build_boundaries(diagram_type: str, nodes: list[Node], request: str) -> lis
 PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     "aws-reference": [
         ("boundary-aws-external", "External / On-Premises", "logical"),
+        ("boundary-aws-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-aws-account", "AWS Account / Region", "cloud"),
         ("boundary-aws-edge", "Edge / Ingress", "logical"),
         ("boundary-aws-compute", "Compute / Microservices", "logical"),
@@ -276,6 +343,7 @@ PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "azure-reference": [
         ("boundary-azure-external", "External / Internet", "logical"),
+        ("boundary-azure-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-azure-global", "Azure Global Services", "cloud"),
         ("boundary-azure-region-primary", "Primary Region", "cloud"),
         ("boundary-azure-region-secondary", "Secondary Region", "cloud"),
@@ -285,6 +353,7 @@ PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "data-platform-pipeline": [
         ("boundary-data-sources", "Sources", "logical"),
+        ("boundary-data-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-data-ingest", "Ingest", "logical"),
         ("boundary-data-process", "Process", "logical"),
         ("boundary-data-store", "Store", "logical"),
@@ -331,8 +400,13 @@ def _pattern_classifier(pattern_id: str):
     return None
 
 
+_CICD_TERMS = ["github", "terraform", "jenkins", "gitlab", "argocd", "helm", "ci/cd", "cicd"]
+
+
 def _aws_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in [*_CICD_TERMS, "codepipeline", "codebuild", "codedeploy"]):
+        return "boundary-aws-devops"
     if any(term in text for term in ["consumer", "reviewer", "engineer", "auditor", "sns", "notification", "email"]):
         return "boundary-aws-consumers"
     if any(term in text for term in ["quicksight", "athena", "redshift", "kinesis analytics", "sagemaker", "comprehend", "rekognition", "analytics", "ai/ml"]):
@@ -350,6 +424,8 @@ def _aws_group_for_node(node: Node) -> str:
 
 def _azure_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in [*_CICD_TERMS, "azure devops", "azure pipelines"]):
+        return "boundary-azure-devops"
     if any(term in text for term in ["monitor", "log analytics", "grafana", "prometheus", "azure monitor"]):
         return "boundary-azure-operations"
     if any(term in text for term in ["key vault", "vault", "secret", "active directory", "entra", "rbac", "identity", "mfa", "pim", "managed identity"]):
@@ -369,6 +445,8 @@ def _azure_group_for_node(node: Node) -> str:
 
 def _data_platform_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["github", "terraform", "jenkins", "gitlab ci", "argocd", "ci/cd"]):
+        return "boundary-data-devops"
     if any(term in text for term in ["governance", "purview", "data catalog", "lineage", "policy", "compliance"]):
         return "boundary-data-governance"
     if any(term in text for term in ["power bi", "dashboard", "report", "tableau", "looker", "consumer", "analyst", "serve"]):
