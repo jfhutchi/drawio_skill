@@ -12,6 +12,8 @@ from .adversarial_review import improve_diagram, render_adversarial_review, revi
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
 from .drawio_xml import build_page_diagrams, generate_multipage_drawio_xml
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
+from .layout_engine import infer_layer
+from .model_io import ModelValidationError, load_model
 from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
@@ -29,20 +31,41 @@ from .visual_qa import (
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.model and (args.input or args.input_dir):
+        parser.error("--model cannot be combined with --input/--input-dir; the model already is the extraction result")
+    if not args.model and not args.request:
+        parser.error("--request is required unless --model is given")
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    request = redact_sensitive_text(args.request)
-    extraction = extract_components_from_text("request", request)
-    extraction.extend(load_inputs(args.input, args.input_dir))
+    if args.model:
+        try:
+            improved = load_model(Path(args.model))
+        except ModelValidationError as exc:
+            for error in exc.errors:
+                print(f"model validation error: {error}", file=sys.stderr)
+            return 2
+        _fill_model_gaps(improved)
+        request = redact_sensitive_text(args.request or improved.title)
+        diagram_type = args.diagram_type or improved.diagram_type
+        # The agent-authored model is trusted: no extraction, no re-grouping,
+        # no structural "improvement" pass. Review still runs for the report.
+        initial_findings = review_diagram(improved)
+        final_findings = initial_findings
+        visual_pattern = recommend_visual_pattern(improved, request)
+        improved.metadata.setdefault("visual_pattern_id", visual_pattern.pattern_id)
+    else:
+        request = redact_sensitive_text(args.request)
+        extraction = extract_components_from_text("request", request)
+        extraction.extend(load_inputs(args.input, args.input_dir))
 
-    diagram_type = args.diagram_type or detect_diagram_type(request)
-    diagram = build_diagram(request, extraction, diagram_type, args.audience, args.layout)
-    initial_findings = review_diagram(diagram)
-    improved = improve_diagram(diagram, initial_findings)
-    final_findings = review_diagram(improved)
-    visual_pattern = recommend_visual_pattern(improved, request)
-    apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
+        diagram_type = args.diagram_type or detect_diagram_type(request)
+        diagram = build_diagram(request, extraction, diagram_type, args.audience, args.layout)
+        initial_findings = review_diagram(diagram)
+        improved = improve_diagram(diagram, initial_findings)
+        final_findings = review_diagram(improved)
+        visual_pattern = recommend_visual_pattern(improved, request)
+        apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
     page_plan = build_page_plan(improved)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
@@ -96,9 +119,26 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _fill_model_gaps(diagram: Diagram) -> None:
+    """Fill only derivable gaps in an agent-authored model; trust everything else."""
+
+    for node in diagram.nodes:
+        if not node.layer:
+            node.layer = infer_layer(node)
+    for edge in diagram.edges:
+        edge.metadata.setdefault("flow_type", _infer_flow_type(edge))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate enterprise diagrams.net XML from requests and files.")
-    parser.add_argument("--request", required=True, help="Natural-language diagram request.")
+    parser.add_argument("--request", help="Natural-language diagram request. Optional when --model is given.")
+    parser.add_argument(
+        "--model",
+        help=(
+            "Path to an agent-authored diagram model (JSON always; YAML only when a yaml module is importable). "
+            "Skips extraction and grouping entirely. Mutually exclusive with --input/--input-dir."
+        ),
+    )
     parser.add_argument("--input", action="append", help="Input file to inspect. May be repeated.")
     parser.add_argument("--input-dir", help="Directory of input files to inspect.")
     parser.add_argument("--diagram-type", help="Diagram type override, such as enterprise, cloud, kubernetes, cicd, code, security.")

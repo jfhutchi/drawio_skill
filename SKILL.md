@@ -13,6 +13,8 @@ Use the helper package in `src/drawio_generator` when executable scripts are ava
 
 ## Required Workflow
 
+**Model-first is the primary workflow.** You (the agent) do the semantic work — extraction, deduplication, grouping, naming — better than any regex. Author the intermediate model yourself as `model.json` (see `schemas/diagram-model.schema.json` and `templates/model-template.yaml`), then call the helper with `--model model.json` for layout, XML emission, previews, and QA. The `--request`/`--input` regex-extraction path is a bootstrap for non-agent use only; do not rely on it when you can read the inputs yourself.
+
 Follow this sequence for every diagram request:
 
 1. Understand the user request and target audience.
@@ -22,7 +24,7 @@ Follow this sequence for every diagram request:
 5. Extract components, relationships, boundaries, ownership, flows, data stores, identity, security controls, observability, and unknowns.
 6. Choose a notation and layout strategy.
 7. Map icons and stencils, using safe fallbacks when a precise icon is unavailable.
-8. Build an intermediate diagram model.
+8. Build the intermediate diagram model and write it to `model.json`. Deduplicate synonyms ("Application Gateway WAF" vs "Azure Application Gateway" is one node), give every node a group, and give every page-1 node at least one edge.
 9. Build a page plan that separates the executive overview from implementation detail, security, data/evidence flow, and operations follow-up.
 10. Generate real draw.io pages from the page plan: Page 1 executive view, later pages for detail/security/data/operations.
 11. Select a visual pattern and write `visual-guide.md`.
@@ -273,7 +275,18 @@ Write the hostile review to `output/adversarial-review.md`, then improve the mod
 
 ## Helper CLI
 
-When scripts can be executed, use the helper:
+When scripts can be executed, use the helper. Primary (model-first) form:
+
+```bash
+python -m drawio_generator.cli \
+  --model ./model.json \
+  --output ./output \
+  --validate
+```
+
+`--model` accepts JSON always (YAML only when a `yaml` module is importable), skips extraction and grouping entirely, and trusts your model: the helper only fills missing `layer` values and missing edge `flow_type` metadata. It is mutually exclusive with `--input`/`--input-dir`; `--request` becomes optional (used for title fallback). Structural validation errors (duplicate ids, dangling edge endpoints, unknown fields) are reported with JSON paths and exit code 2.
+
+Bootstrap (regex-extraction) form for non-agent use:
 
 ```bash
 python -m drawio_generator.cli \
