@@ -13,6 +13,8 @@ Use the helper package in `src/drawio_generator` when executable scripts are ava
 
 ## Required Workflow
 
+**Model-first is the primary workflow.** You (the agent) do the semantic work — extraction, deduplication, grouping, naming — better than any regex. Author the intermediate model yourself as `model.json` (see `schemas/diagram-model.schema.json` and `templates/model-template.yaml`), then call the helper with `--model model.json` for layout, XML emission, previews, and QA. The `--request`/`--input` regex-extraction path is a bootstrap for non-agent use only; do not rely on it when you can read the inputs yourself.
+
 Follow this sequence for every diagram request:
 
 1. Understand the user request and target audience.
@@ -22,7 +24,7 @@ Follow this sequence for every diagram request:
 5. Extract components, relationships, boundaries, ownership, flows, data stores, identity, security controls, observability, and unknowns.
 6. Choose a notation and layout strategy.
 7. Map icons and stencils, using safe fallbacks when a precise icon is unavailable.
-8. Build an intermediate diagram model.
+8. Build the intermediate diagram model and write it to `model.json`. Deduplicate synonyms ("Application Gateway WAF" vs "Azure Application Gateway" is one node), give every node a group, and give every page-1 node at least one edge.
 9. Build a page plan that separates the executive overview from implementation detail, security, data/evidence flow, and operations follow-up.
 10. Generate real draw.io pages from the page plan: Page 1 executive view, later pages for detail/security/data/operations.
 11. Select a visual pattern and write `visual-guide.md`.
@@ -31,9 +33,12 @@ Follow this sequence for every diagram request:
 14. Generate uncompressed draw.io XML.
 15. Validate XML and model references.
 16. Run static visual QA and renderer availability detection; write `render-qa.md`.
-17. Check visual quality and output files.
-18. Produce final files and a concise explanation.
-19. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+17. Render the model previews (`preview-page-<n>.svg`, plus `.png` when Pillow is installed) and **view the page-1 preview image**. Do not skip this step: the preview shows what the layout engine actually planned.
+18. If `render-qa.md` opens with `RESULT: FAIL`, fix the model or input and re-render. Repeat render → view → fix until it opens with `RESULT: PASS`.
+19. Produce final files and a concise explanation.
+20. Report assumptions, limitations, unknowns, and recommended follow-up diagrams.
+
+**Never report a diagram as complete while `render-qa.md` says `RESULT: FAIL`.** The `--validate` flag exits 1 on any error-severity visual QA finding or XML validation error; artifacts are still written so you can inspect and fix them.
 
 Do not generate raw draw.io XML directly from unstructured prose. Always create or reason through the intermediate model first.
 
@@ -197,7 +202,21 @@ Support at least these categories:
 - Data/messaging: PostgreSQL, SQL Server, MySQL, Oracle, Redis, Kafka, RabbitMQ, queues, event bus, object storage, file share, warehouse, data lake, backup, replication, ETL/ELT.
 - Observability/operations: Prometheus, Grafana, OpenTelemetry, Jaeger, Elastic, Splunk, log analytics, metrics, traces, alerts, incident management, runbooks, SLO/SLA, health checks, synthetic monitoring.
 
-If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. By default the helper resolves recognized Azure, AWS, GCP, and Kubernetes service names to real diagrams.net built-in vendor stencils (`mxgraph.azure.*`, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*`) — these ship with diagrams.net and require no proprietary icon pack. Unrecognized labels fall back to vendor-tagged generic shapes, and `validate_vendor_shape_accuracy` warns when a vendor-named node still resolves to a generic shape. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
+If a precise icon is unavailable, use the closest safe shape and a clear label. Never fail only because an icon is unavailable. The helper renders every node with one visual grammar: a near-white card with the label inside, and — when the service resolves to bundled diagrams.net artwork (modern `img/lib/azure2/*` Azure icons, `mxgraph.aws4.*`, `mxgraph.gcp2.*`, `mxgraph.kubernetes.*` stencils, plus verified tool marks like GitHub and Docker) — a fixed-size 40×40 glyph anchored to the card's top-right. Stencils are never stretched to node size. Unrecognized labels get a plain card, and `validate_vendor_shape_accuracy` warns when a vendor-named node resolves to no glyph. Do not describe these built-in vendor stencils as official Microsoft/Azure/AWS icon packs unless a licensed local pack was actually used and documented under `stencils/<vendor>/manifest.json`.
+
+### Finding icons with draw.io shape search
+
+The built-in registry covers common services, but draw.io's own shape search is the full icon catalog — use it whenever a node that deserves an icon renders as a plain card in the preview:
+
+1. Open diagrams.net (app.diagrams.net or the desktop app) and type the service or tool name into the **shape search box**.
+2. Place the best result on the canvas, select it, and read its style (Ctrl+E / Edit Style, or Extras → Edit Diagram).
+3. Put what you found into the node's `icon` field in `model.json`. All three forms work:
+   - the full style string (anything containing `shape=` or `image=`),
+   - a bare stencil reference such as `mxgraph.weblogos.github`,
+   - a bundled image path such as `azure2/devops/Azure_DevOps.svg` (`img/lib/` prefix optional).
+4. Regenerate and check the preview; before delivery, open the `.drawio` in diagrams.net — an unregistered shape name or wrong image path renders as a blank/placeholder box, which is exactly what the check exists to catch.
+
+Prefer shapes from libraries bundled with diagrams.net so files render everywhere, including offline; avoid external image URLs. The helper renders whatever you supply as the standard 40×40 fixed-aspect glyph on the card.
 
 Use icon-like visual cues for common enterprise review nodes: repository/folder for source control, controller/process for Tower/AWX, server for Linux/Windows targets, cylinder for databases, queue for RabbitMQ/Kafka, note/document for Excel workbooks and reports, vault/lock for secret stores, cloud/object for SFS or object storage, and actor/user shapes for consumers.
 
@@ -220,26 +239,14 @@ Prefer uncompressed XML unless compression is explicitly required. Human-readabl
 
 ## Validation Rules
 
-Before final response, validate:
+Run the helper with `--validate` and read `render-qa.md`. The code enforces the hard rules — XML structure, unique ids, edge references, geometry, overlap-free furniture, disjoint boundaries, grid-aligned coordinates, single numbering mechanism, monotonic numbered flows, route/node collisions, text fit, contrast, secret redaction — and exits 1 on any error-severity finding. Your job is the loop, not the checklist:
 
-- XML parseability.
-- Required draw.io structure.
-- Unique IDs.
-- Edge source/target existence.
-- Geometry presence.
-- Important labels are non-empty.
-- Busy edge labels are shortened or numbered with full descriptions moved to a legend.
-- Page 1 has enough spacing for nodes, labels, and routed arrows to avoid overlaps.
-- `page-plan.md` exists and separates executive content from detail, security, data/evidence, and operations content.
-- `visual-guide.md` exists and selects the reference visual pattern, layout rules, callout rules, and quality gates.
-- No raw secrets.
-- Output files exist.
-- Diagram summary exists.
-- Assumptions/unknowns exist.
-- Adversarial review exists.
-- Quality checklist exists.
+1. Generate with `--validate`.
+2. Read `render-qa.md` and **view `preview-page-1.svg`**.
+3. If `RESULT: FAIL`, fix the model and regenerate.
+4. Only report completion on `RESULT: PASS`.
 
-If validation fails, fix the model or XML. Do not tell the user it is complete until validation has been run and read.
+Degree-0 nodes are automatically parked in an "Unconfirmed components" tray on the Implementation Detail page (recorded in `assumptions.md`); give a node an edge if it belongs on page 1. Pages use the smallest standard landscape size that fits (A4, then A3); pages that must exceed A3 are noted in `render-qa.md`.
 
 ## Security and Redaction
 
@@ -270,7 +277,18 @@ Write the hostile review to `output/adversarial-review.md`, then improve the mod
 
 ## Helper CLI
 
-When scripts can be executed, use the helper:
+When scripts can be executed, use the helper. Primary (model-first) form:
+
+```bash
+python -m drawio_generator.cli \
+  --model ./model.json \
+  --output ./output \
+  --validate
+```
+
+`--model` accepts JSON always (YAML only when a `yaml` module is importable), skips extraction and grouping entirely, and trusts your model: the helper only fills missing `layer` values and missing edge `flow_type` metadata. It is mutually exclusive with `--input`/`--input-dir`; `--request` becomes optional (used for title fallback). Structural validation errors (duplicate ids, dangling edge endpoints, unknown fields) are reported with JSON paths and exit code 2.
+
+Bootstrap (regex-extraction) form for non-agent use:
 
 ```bash
 python -m drawio_generator.cli \
@@ -288,13 +306,14 @@ The helper writes:
 - `diagram-summary.md`
 - `page-plan.md`
 - `visual-guide.md`
-- `render-qa.md`
+- `render-qa.md` — opens with `RESULT: PASS` or `RESULT: FAIL (<n> errors)`
+- `preview-page-<n>.svg` — model-faithful preview of every page (plus `.png` when Pillow or matplotlib is importable; install with `pip install -e ".[preview]"`)
 - `assumptions.md`
 - `adversarial-review.md`
 - `quality-checklist.md`
 - `research-summary.md`
 
-SVG/PNG export is optional and depends on external diagrams.net rendering tools.
+With `--validate`, the exit code is 1 whenever visual QA finds an error-severity issue or the XML validator reports errors; all artifacts are still written. When a local draw.io binary is detected, the helper additionally attempts a real PNG export per page (`render-page-<n>.png`) and records success or failure honestly in `render-qa.md`.
 
 ## Standalone Validation Script
 

@@ -122,8 +122,8 @@ class DrawioXmlTests(unittest.TestCase):
         model = root.find(".//mxGraphModel")
         cells = {cell.attrib.get("id"): cell for cell in root.findall(".//mxCell")}
 
-        self.assertGreaterEqual(int(model.attrib["pageWidth"]), 1300)
-        self.assertEqual("1", cells["edge-control"].attrib["value"])
+        self.assertGreaterEqual(int(model.attrib["pageWidth"]), 1169)
+        self.assertEqual("", cells["edge-control"].attrib["value"])
         self.assertIn("strokeColor=#4f46e5", cells["edge-control"].attrib["style"])
         self.assertIn("strokeColor=#2f9e44", cells["edge-collect"].attrib["style"])
         self.assertIn("strokeColor=#d97706", cells["edge-report"].attrib["style"])
@@ -132,11 +132,20 @@ class DrawioXmlTests(unittest.TestCase):
         self.assertIn("strokeColor=#dc2626", cells["edge-sensitive"].attrib["style"])
         self.assertIn("dashed=1", cells["edge-sensitive"].attrib["style"])
         self.assertIn("1: Project sync pulls latest SHC repository", cells["__legend"].attrib["value"])
-        self.assertEqual("1", cells["__badge_edge-control"].attrib["value"])
-        self.assertIn("ellipse", cells["__badge_edge-control"].attrib["style"])
-        self.assertIn("fillColor=#4f46e5", cells["__badge_edge-control"].attrib["style"])
-        self.assertEqual("2", cells["__badge_edge-collect"].attrib["value"])
-        self.assertIn("fillColor=#2f9e44", cells["__badge_edge-collect"].attrib["style"])
+        # Single numbering mechanism: one edgeLabel child riding each numbered edge.
+        control_label = cells["edge-control__n"]
+        self.assertEqual("1", control_label.attrib["value"])
+        self.assertIn("edgeLabel", control_label.attrib["style"])
+        self.assertIn("fillColor=#4f46e5", control_label.attrib["style"])
+        self.assertEqual("edge-control", control_label.attrib["parent"])
+        self.assertEqual("0", control_label.attrib["connectable"])
+        # Orthogonal offset floats the pill beside the line, not on it.
+        label_geometry = control_label.find("mxGeometry")
+        self.assertEqual("-14", label_geometry.attrib.get("y"))
+        self.assertEqual("1", label_geometry.attrib.get("relative"))
+        self.assertEqual("2", cells["edge-collect__n"].attrib["value"])
+        self.assertIn("fillColor=#2f9e44", cells["edge-collect__n"].attrib["style"])
+        self.assertFalse(any("__badge_" in cell_id for cell_id in cells if cell_id))
 
     def test_enterprise_layout_uses_wide_readable_nodes_and_trust_boundaries(self):
         diagram = Diagram(
@@ -191,7 +200,11 @@ class DrawioXmlTests(unittest.TestCase):
         xml_text = generate_multipage_drawio_xml(diagram, build_page_plan(diagram))
         root = ET.fromstring(xml_text)
         security_page = next(page for page in root.findall("diagram") if page.attrib["name"] == "Security and Trust Boundaries")
-        security_edge_values = sorted(int(cell.attrib["value"]) for cell in security_page.findall(".//mxCell[@edge='1']") if cell.attrib.get("value", "").isdigit())
+        security_edge_values = sorted(
+            int(cell.attrib["value"])
+            for cell in security_page.findall(".//mxCell[@vertex='1']")
+            if "edgeLabel" in cell.attrib.get("style", "") and cell.attrib.get("value", "").isdigit()
+        )
 
         self.assertIn(1, security_edge_values)
         self.assertEqual(list(range(1, len(security_edge_values) + 1)), security_edge_values)

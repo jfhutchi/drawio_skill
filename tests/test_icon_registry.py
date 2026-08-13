@@ -23,9 +23,11 @@ class IconRegistryTests(unittest.TestCase):
         self.assertEqual("azure", vault.vendor)
         self.assertEqual("azure", front_door.vendor)
         self.assertFalse(aks.official)
-        self.assertIn("shape=mxgraph.azure.kubernetes_services", aks.drawio_style)
-        self.assertIn("shape=mxgraph.azure.key_vaults", vault.drawio_style)
-        self.assertIn("shape=mxgraph.azure.front_doors", front_door.drawio_style)
+        # Verified azure2 image shapes (modern colorful Azure icon set).
+        self.assertIn("image=img/lib/azure2/containers/Kubernetes_Services.svg", aks.drawio_style)
+        self.assertIn("image=img/lib/azure2/security/Key_Vaults.svg", vault.drawio_style)
+        self.assertIn("image=img/lib/azure2/networking/Front_Doors.svg", front_door.drawio_style)
+        self.assertIn("aspect=fixed", aks.drawio_style)
         self.assertIn("built-in azure stencil", aks.license_notice.lower())
 
     def test_recognized_aws_services_use_builtin_vendor_stencils(self):
@@ -83,7 +85,7 @@ class IconRegistryTests(unittest.TestCase):
         style = get_icon_style("component", "Azure Kubernetes Service")
 
         self.assertEqual("azure", style.vendor)
-        self.assertIn("mxgraph.azure", style.drawio_style)
+        self.assertIn("img/lib/azure2/containers/Kubernetes_Services.svg", style.drawio_style)
         self.assertNotIn("fillColor=#dae8fc", style.drawio_style)
 
     def test_unknown_vendor_service_keeps_vendor_tagged_fallback(self):
@@ -160,8 +162,8 @@ class IconRegistryTests(unittest.TestCase):
 
             self.assertFalse(aks.official)
             # Without acknowledgement the licensed pack is ignored, but the
-            # built-in diagrams.net Azure stencil is still used.
-            self.assertIn("shape=mxgraph.azure.kubernetes_services", aks.drawio_style)
+            # built-in diagrams.net Azure icon is still used.
+            self.assertIn("img/lib/azure2/containers/Kubernetes_Services.svg", aks.drawio_style)
 
 
 if __name__ == "__main__":

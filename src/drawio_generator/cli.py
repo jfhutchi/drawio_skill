@@ -7,34 +7,68 @@ import re
 import sys
 from pathlib import Path
 
+from . import preview
 from .adversarial_review import improve_diagram, render_adversarial_review, review_diagram
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .drawio_xml import generate_multipage_drawio_xml
+from .drawio_xml import build_page_diagrams, generate_multipage_drawio_xml, page_size_notes
 from .file_ingestion import ExtractionResult, extract_components_from_text, load_inputs
+from .icon_registry import canonical_component_key
+from .layout_engine import infer_layer
+from .model_io import ModelValidationError, load_model
 from .page_planner import build_page_plan, render_page_plan
 from .research_planner import render_research_summary
 from .validators import redact_sensitive_text, validate_drawio_xml, validate_model
 from .visual_patterns import recommend_visual_pattern, render_visual_guide
-from .visual_qa import analyze_drawio_xml, detect_renderer, render_visual_qa
+from .visual_qa import (
+    analyze_drawio_xml,
+    analyze_page_models,
+    detect_renderer,
+    export_pages_with_renderer,
+    qa_error_count,
+    render_visual_qa,
+    result_line,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.model and (args.input or args.input_dir):
+        parser.error("--model cannot be combined with --input/--input-dir; the model already is the extraction result")
+    if not args.model and not args.request:
+        parser.error("--request is required unless --model is given")
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    request = redact_sensitive_text(args.request)
-    extraction = extract_components_from_text("request", request)
-    extraction.extend(load_inputs(args.input, args.input_dir))
+    if args.model:
+        try:
+            improved = load_model(Path(args.model))
+        except ModelValidationError as exc:
+            for error in exc.errors:
+                print(f"model validation error: {error}", file=sys.stderr)
+            return 2
+        _fill_model_gaps(improved)
+        request = redact_sensitive_text(args.request or improved.title)
+        diagram_type = args.diagram_type or improved.diagram_type
+        # The agent-authored model is trusted: no extraction, no re-grouping,
+        # no structural "improvement" pass. Review still runs for the report.
+        initial_findings = review_diagram(improved)
+        final_findings = initial_findings
+        visual_pattern = recommend_visual_pattern(improved, request)
+        improved.metadata.setdefault("visual_pattern_id", visual_pattern.pattern_id)
+    else:
+        request = redact_sensitive_text(args.request)
+        extraction = extract_components_from_text("request", request)
+        extraction.extend(load_inputs(args.input, args.input_dir))
 
-    diagram_type = args.diagram_type or detect_diagram_type(request)
-    diagram = build_diagram(request, extraction, diagram_type, args.audience, args.layout)
-    initial_findings = review_diagram(diagram)
-    improved = improve_diagram(diagram, initial_findings)
-    final_findings = review_diagram(improved)
-    visual_pattern = recommend_visual_pattern(improved, request)
-    apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
+        diagram_type = args.diagram_type or detect_diagram_type(request)
+        diagram = build_diagram(request, extraction, diagram_type, args.audience, args.layout)
+        initial_findings = review_diagram(diagram)
+        improved = improve_diagram(diagram, initial_findings)
+        final_findings = review_diagram(improved)
+        visual_pattern = recommend_visual_pattern(improved, request)
+        apply_visual_pattern_to_diagram(improved, visual_pattern.pattern_id)
+    _park_disconnected_nodes(improved)
     page_plan = build_page_plan(improved)
 
     model_issues = [issue for issue in validate_model(improved) if issue.severity == "error"]
@@ -43,20 +77,32 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model validation error: {issue.message}", file=sys.stderr)
         return 2
 
-    drawio_xml = generate_multipage_drawio_xml(improved, page_plan)
+    pages = build_page_diagrams(improved, page_plan)
+    drawio_xml = generate_multipage_drawio_xml(improved, page_plan, pages=pages)
     xml_issues = [issue for issue in validate_drawio_xml(drawio_xml) if issue.severity == "error"]
-    visual_qa_issues = analyze_drawio_xml(drawio_xml)
+    visual_qa_issues = analyze_page_models(pages) + analyze_drawio_xml(drawio_xml)
     renderer = detect_renderer()
-    if args.validate and xml_issues:
-        for issue in xml_issues:
-            print(f"draw.io validation error: {issue.message}", file=sys.stderr)
-        return 3
 
-    (output_dir / "diagram.drawio").write_text(drawio_xml, encoding="utf-8")
+    xml_path = output_dir / "diagram.drawio"
+    xml_path.write_text(drawio_xml, encoding="utf-8")
+    preview_paths = preview.write_previews(pages, output_dir)
+    exports = export_pages_with_renderer(renderer, xml_path, output_dir, len(pages))
+    error_count = qa_error_count(visual_qa_issues, len(xml_issues))
+
     (output_dir / "diagram-summary.md").write_text(render_summary(improved), encoding="utf-8")
     (output_dir / "page-plan.md").write_text(render_page_plan(page_plan), encoding="utf-8")
     (output_dir / "visual-guide.md").write_text(render_visual_guide(visual_pattern), encoding="utf-8")
-    (output_dir / "render-qa.md").write_text(render_visual_qa(visual_qa_issues, renderer), encoding="utf-8")
+    (output_dir / "render-qa.md").write_text(
+        render_visual_qa(
+            visual_qa_issues,
+            renderer,
+            xml_error_count=len(xml_issues),
+            exports=exports,
+            preview_paths=preview_paths,
+            size_notes=page_size_notes(pages),
+        ),
+        encoding="utf-8",
+    )
     (output_dir / "assumptions.md").write_text(render_assumptions(improved), encoding="utf-8")
     (output_dir / "adversarial-review.md").write_text(render_adversarial_review(initial_findings, final_findings), encoding="utf-8")
     (output_dir / "quality-checklist.md").write_text(
@@ -65,13 +111,69 @@ def main(argv: list[str] | None = None) -> int:
     )
     (output_dir / "research-summary.md").write_text(render_research_summary(request, diagram_type), encoding="utf-8")
 
+    print(result_line(error_count))
+    for issue in xml_issues:
+        print(f"draw.io validation error: {issue.message}", file=sys.stderr)
+    for issue in visual_qa_issues:
+        if issue.severity == "error":
+            print(f"visual QA error: {issue.message}", file=sys.stderr)
     print(f"Wrote draw.io diagram and review artifacts to {output_dir}")
+    if args.validate and error_count:
+        return 1
     return 0
+
+
+def _fill_model_gaps(diagram: Diagram) -> None:
+    """Fill only derivable gaps in an agent-authored model; trust everything else."""
+
+    for node in diagram.nodes:
+        if not node.layer:
+            node.layer = infer_layer(node)
+    for edge in diagram.edges:
+        edge.metadata.setdefault("flow_type", _infer_flow_type(edge))
+
+
+UNCONFIRMED_BOUNDARY_ID = "boundary-unconfirmed"
+
+
+def _park_disconnected_nodes(diagram: Diagram) -> None:
+    """Degree-0 nodes never appear on page 1.
+
+    They are parked in an "Unconfirmed components" tray that the page planner
+    places on the Implementation Detail page, and each parking is recorded in
+    the assumptions. Skipped when the diagram has no edges at all (then the
+    whole diagram is intentionally unconnected).
+    """
+
+    if not diagram.edges:
+        return
+    connected = {edge.source for edge in diagram.edges} | {edge.target for edge in diagram.edges}
+    parked = [node for node in diagram.nodes if node.id not in connected]
+    if not parked:
+        return
+    if all(boundary.id != UNCONFIRMED_BOUNDARY_ID for boundary in diagram.boundaries):
+        diagram.boundaries.append(
+            Boundary(id=UNCONFIRMED_BOUNDARY_ID, label="Unconfirmed components", boundary_type="logical")
+        )
+    for node in parked:
+        node.group = UNCONFIRMED_BOUNDARY_ID
+        node.metadata = {**node.metadata, "detail_level": "detail"}
+        diagram.assumptions.append(
+            f"'{node.label}' was extracted with no relationship evidence; "
+            "parked in the Unconfirmed components tray on the Implementation Detail page."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate enterprise diagrams.net XML from requests and files.")
-    parser.add_argument("--request", required=True, help="Natural-language diagram request.")
+    parser.add_argument("--request", help="Natural-language diagram request. Optional when --model is given.")
+    parser.add_argument(
+        "--model",
+        help=(
+            "Path to an agent-authored diagram model (JSON always; YAML only when a yaml module is importable). "
+            "Skips extraction and grouping entirely. Mutually exclusive with --input/--input-dir."
+        ),
+    )
     parser.add_argument("--input", action="append", help="Input file to inspect. May be repeated.")
     parser.add_argument("--input-dir", help="Directory of input files to inspect.")
     parser.add_argument("--diagram-type", help="Diagram type override, such as enterprise, cloud, kubernetes, cicd, code, security.")
@@ -112,7 +214,7 @@ def detect_diagram_type(request: str) -> str:
 
 
 def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str, audience: str, layout: str | None) -> Diagram:
-    nodes = _dedupe_nodes(extraction.components)
+    nodes, id_map = _dedupe_nodes(extraction.components)
     if not nodes:
         nodes = [
             Node(id="user", label="User / External System", node_type="user"),
@@ -121,7 +223,8 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
         ]
     nodes = _apply_audience_filter(nodes, audience)
     boundaries = _build_boundaries(diagram_type, nodes, request)
-    edges = _build_edges(nodes, extraction.relationships)
+    relationships = _remap_relationships(extraction.relationships, id_map)
+    edges = _build_edges(nodes, relationships)
     title = _title_from_request(request, diagram_type)
     direction = layout or ("left-to-right" if diagram_type in {"enterprise", "cloud", "cicd", "workflow", "code"} else "top-to-bottom")
     _assign_node_groups(nodes, boundaries, diagram_type)
@@ -154,10 +257,32 @@ def build_diagram(request: str, extraction: ExtractionResult, diagram_type: str,
     return diagram
 
 
-def _dedupe_nodes(nodes: list[Node]) -> list[Node]:
-    seen: set[str] = set()
+def _dedupe_nodes(nodes: list[Node]) -> tuple[list[Node], dict[str, str]]:
+    """Dedupe components on canonical vendor identity, not raw label text.
+
+    "Application Gateway WAF" and "Azure Application Gateway" resolve to the
+    same built-in stencil, so they are one node; the most specific (longest)
+    label wins. Returns the surviving nodes plus original-id -> kept-id map
+    so extracted relationships can follow the merge.
+    """
+
+    by_key: dict[str, Node] = {}
+    mapping: list[tuple[str, Node]] = []
     deduped: list[Node] = []
     for node in nodes:
+        key = canonical_component_key(node.label)
+        kept = by_key.get(key)
+        if kept is None:
+            by_key[key] = node
+            deduped.append(node)
+            mapping.append((node.id, node))
+            continue
+        if len(node.label) > len(kept.label):
+            kept.label = node.label
+        mapping.append((node.id, kept))
+
+    seen: set[str] = set()
+    for node in deduped:
         base = node.id
         candidate = base
         counter = 2
@@ -166,8 +291,17 @@ def _dedupe_nodes(nodes: list[Node]) -> list[Node]:
             counter += 1
         node.id = candidate
         seen.add(candidate)
-        deduped.append(node)
-    return deduped
+    return deduped, {original: kept.id for original, kept in mapping}
+
+
+def _remap_relationships(relationships: list[Edge], id_map: dict[str, str]) -> list[Edge]:
+    remapped: list[Edge] = []
+    for edge in relationships:
+        edge.source = id_map.get(edge.source, edge.source)
+        edge.target = id_map.get(edge.target, edge.target)
+        if edge.source != edge.target:
+            remapped.append(edge)
+    return remapped
 
 
 def _apply_audience_filter(nodes: list[Node], audience: str) -> list[Node]:
@@ -199,6 +333,7 @@ def _build_boundaries(diagram_type: str, nodes: list[Node], request: str) -> lis
 PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     "aws-reference": [
         ("boundary-aws-external", "External / On-Premises", "logical"),
+        ("boundary-aws-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-aws-account", "AWS Account / Region", "cloud"),
         ("boundary-aws-edge", "Edge / Ingress", "logical"),
         ("boundary-aws-compute", "Compute / Microservices", "logical"),
@@ -208,6 +343,7 @@ PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "azure-reference": [
         ("boundary-azure-external", "External / Internet", "logical"),
+        ("boundary-azure-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-azure-global", "Azure Global Services", "cloud"),
         ("boundary-azure-region-primary", "Primary Region", "cloud"),
         ("boundary-azure-region-secondary", "Secondary Region", "cloud"),
@@ -217,6 +353,7 @@ PATTERN_BOUNDARY_SPECS: dict[str, list[tuple[str, str, str]]] = {
     ],
     "data-platform-pipeline": [
         ("boundary-data-sources", "Sources", "logical"),
+        ("boundary-data-devops", "DevOps / CI-CD (External)", "logical"),
         ("boundary-data-ingest", "Ingest", "logical"),
         ("boundary-data-process", "Process", "logical"),
         ("boundary-data-store", "Store", "logical"),
@@ -263,8 +400,13 @@ def _pattern_classifier(pattern_id: str):
     return None
 
 
+_CICD_TERMS = ["github", "terraform", "jenkins", "gitlab", "argocd", "helm", "ci/cd", "cicd"]
+
+
 def _aws_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in [*_CICD_TERMS, "codepipeline", "codebuild", "codedeploy"]):
+        return "boundary-aws-devops"
     if any(term in text for term in ["consumer", "reviewer", "engineer", "auditor", "sns", "notification", "email"]):
         return "boundary-aws-consumers"
     if any(term in text for term in ["quicksight", "athena", "redshift", "kinesis analytics", "sagemaker", "comprehend", "rekognition", "analytics", "ai/ml"]):
@@ -282,6 +424,8 @@ def _aws_group_for_node(node: Node) -> str:
 
 def _azure_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in [*_CICD_TERMS, "azure devops", "azure pipelines"]):
+        return "boundary-azure-devops"
     if any(term in text for term in ["monitor", "log analytics", "grafana", "prometheus", "azure monitor"]):
         return "boundary-azure-operations"
     if any(term in text for term in ["key vault", "vault", "secret", "active directory", "entra", "rbac", "identity", "mfa", "pim", "managed identity"]):
@@ -301,6 +445,8 @@ def _azure_group_for_node(node: Node) -> str:
 
 def _data_platform_group_for_node(node: Node) -> str:
     text = f"{node.node_type} {node.label} {node.icon or ''}".lower()
+    if any(term in text for term in ["github", "terraform", "jenkins", "gitlab ci", "argocd", "ci/cd"]):
+        return "boundary-data-devops"
     if any(term in text for term in ["governance", "purview", "data catalog", "lineage", "policy", "compliance"]):
         return "boundary-data-governance"
     if any(term in text for term in ["power bi", "dashboard", "report", "tableau", "looker", "consumer", "analyst", "serve"]):

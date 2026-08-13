@@ -4,12 +4,9 @@
   "fontFamily": "Helvetica",
   "fontColor": "#212529",
   "colors": {
-    "application": "#dae8fc",
-    "security": "#e1d5e7",
-    "operations": "#d5e8d4",
-    "data": "#fff2cc",
-    "infrastructure": "#f5f5f5",
-    "risk": "#f8cecc",
+    "card": "#ffffff",
+    "cardAlt": "#fafafa",
+    "panel": "#f8f9fa",
     "boundary": "#f8fbff",
     "trustBoundary": "#fffafa",
     "controlFlow": "#4f46e5",
@@ -17,6 +14,22 @@
     "reportEvidenceFlow": "#d97706",
     "optionalFlow": "#6c757d",
     "securityFlow": "#dc2626"
+  },
+  "strokes": {
+    "application": "#6c8ebf",
+    "workflow": "#82b366",
+    "operations": "#82b366",
+    "data": "#d6b656",
+    "security": "#9673a6",
+    "devops": "#9673a6",
+    "network": "#6c8ebf",
+    "cloud": "#6c8ebf",
+    "platform": "#6c8ebf",
+    "infrastructure": "#666666",
+    "general": "#6c757d",
+    "default": "#6c757d",
+    "risk": "#b85450",
+    "furniture": "#adb5bd"
   },
   "rules": [
     "Use red only for risk, error, or blocked paths.",

@@ -3,12 +3,151 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import xml.etree.ElementTree as ET
 from typing import Any
 
 from .diagram_model import Boundary, Diagram, Edge, LegendItem, Node
-from .icon_registry import get_icon_style
-from .layout_engine import apply_layout
+from .icon_registry import GLYPH_SIZE, get_node_visual
+from .layout_engine import apply_layout, _snap_down, _snap_up
+
+
+LEGEND_WIDTH = 320
+LEGEND_FONT_SIZE = 12
+NOTES_WIDTH = 760
+FURNITURE_GAP = 40
+SIDE_LEGEND_BUDGET = 1654  # A3 landscape width; beyond this the legend drops to the bottom band
+
+
+@dataclass(frozen=True, slots=True)
+class FurnitureBox:
+    """Geometry and text for one page-furniture element (title, legend, notes)."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PageFurniture:
+    title: FurnitureBox
+    legend: FurnitureBox | None
+    notes: FurnitureBox | None
+
+
+def _content_bbox(diagram: Diagram) -> tuple[int, int, int, int]:
+    """Bounding box of laid-out content: boundaries, nodes, and planned routes."""
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for boundary in diagram.boundaries:
+        if boundary.x is None or boundary.y is None:
+            continue
+        xs.extend((boundary.x, boundary.x + boundary.width))
+        ys.extend((boundary.y, boundary.y + boundary.height))
+    for node in diagram.nodes:
+        xs.extend((node.x or 0, (node.x or 0) + node.width))
+        ys.extend((node.y or 0, (node.y or 0) + node.height))
+    for edge in diagram.edges:
+        route = edge.metadata.get("route")
+        if isinstance(route, list):
+            for point in route:
+                xs.append(float(point[0]))
+                ys.append(float(point[1]))
+    if not xs:
+        return (40, 120, 1080, 700)
+    return (_snap_down(min(xs)), _snap_down(min(ys)), _snap_up(max(xs)), _snap_up(max(ys)))
+
+
+def _estimate_wrapped_lines(text: str, box_width: int, font_size: int) -> int:
+    """Line-count estimate using the shared 0.6 * fontSize glyph width metric."""
+
+    max_chars = max(4, int(box_width / (0.6 * font_size)))
+    lines = 0
+    for raw_line in text.split("\n"):
+        lines += max(1, -(-len(raw_line) // max_chars))
+    return lines
+
+
+def compute_furniture(diagram: Diagram) -> PageFurniture:
+    """Place title, legend, and page notes from the laid-out content extents.
+
+    No fixed coordinates: the title band spans the content width at the top,
+    the legend sits right of the content when it fits the page budget and
+    drops into the bottom band beside the notes otherwise. Single source of
+    truth shared by the XML emitter and the preview renderer.
+    """
+
+    min_x, min_y, max_x, max_y = _content_bbox(diagram)
+    title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
+    title = FurnitureBox(min_x, 30, max(400, max_x - min_x), 60, title_value)
+
+    legend_rows = [
+        "Legend",
+        *[f"{item.label}: {item.meaning}" for item in diagram.legends],
+        *_flow_legend_rows(diagram.edges),
+    ]
+    legend_text = "\n".join(legend_rows)
+    legend_height = 20 + sum(
+        _estimate_wrapped_lines(row, LEGEND_WIDTH - 16, LEGEND_FONT_SIZE) for row in legend_rows
+    ) * 22
+    legend_height = _snap_up(legend_height)
+
+    notes_lines = [str(note) for note in diagram.metadata.get("page_notes") or [] if str(note).strip()]
+    bottom_y = _snap_up(max_y + FURNITURE_GAP)
+
+    legend: FurnitureBox | None = None
+    legend_at_side = False
+    if len(legend_rows) > 1:
+        side_x = _snap_up(max_x + FURNITURE_GAP)
+        legend_at_side = side_x + LEGEND_WIDTH + FURNITURE_GAP <= SIDE_LEGEND_BUDGET
+        if legend_at_side:
+            legend = FurnitureBox(side_x, max(30, min_y), LEGEND_WIDTH, legend_height, legend_text)
+
+    notes: FurnitureBox | None = None
+    if notes_lines:
+        notes_text = "Page notes\n" + "\n".join(notes_lines)
+        notes_height = _snap_up(
+            20 + sum(_estimate_wrapped_lines(line, NOTES_WIDTH - 16, LEGEND_FONT_SIZE) for line in ["Page notes", *notes_lines]) * 22
+        )
+        notes = FurnitureBox(min_x, bottom_y, NOTES_WIDTH, notes_height, notes_text)
+
+    if len(legend_rows) > 1 and not legend_at_side:
+        legend_x = min_x + NOTES_WIDTH + FURNITURE_GAP if notes is not None else min_x
+        legend = FurnitureBox(legend_x, bottom_y, LEGEND_WIDTH, legend_height, legend_text)
+
+    return PageFurniture(title, legend, notes)
+
+
+def build_page_diagrams(diagram: Diagram, page_plan: Any) -> list[tuple[str, Diagram]]:
+    """Return (page_name, laid-out id-prefixed Diagram) pairs for each emitted page.
+
+    This is the same page sequence ``generate_multipage_drawio_xml`` emits, so
+    the preview renderer and any model-level QA see exactly what the XML will
+    contain. Falls back to a single laid-out page when the plan is empty.
+    """
+
+    pages = list(getattr(page_plan, "pages", []))
+    built: list[tuple[str, Diagram]] = []
+    emitted = 0
+    for plan_page in pages:
+        page_diagram = _diagram_for_plan_page(diagram, plan_page)
+        if emitted > 0 and not page_diagram.nodes and not page_diagram.edges:
+            continue
+        emitted += 1
+        laid_out = apply_layout(page_diagram)
+        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
+        _renumber_edges_per_page(laid_out)
+        prefix = f"p{emitted}_"
+        prefixed = _prefix_diagram_ids(laid_out, prefix)
+        built.append((_page_name(str(getattr(plan_page, "title", f"Page {emitted}"))), prefixed))
+    if not built:
+        laid_out = apply_layout(diagram)
+        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
+        built.append((_page_name(diagram.title), laid_out))
+    return built
 
 
 def generate_drawio_xml(diagram: Diagram) -> str:
@@ -20,34 +159,27 @@ def generate_drawio_xml(diagram: Diagram) -> str:
     return ET.tostring(mxfile, encoding="unicode", short_empty_elements=True)
 
 
-def generate_multipage_drawio_xml(diagram: Diagram, page_plan: Any) -> str:
+def generate_multipage_drawio_xml(
+    diagram: Diagram,
+    page_plan: Any,
+    pages: list[tuple[str, Diagram]] | None = None,
+) -> str:
     """Generate uncompressed multi-page draw.io XML from a page plan.
 
     Page 1 is the executive architecture view. Later pages are filtered by
     the page-plan node and edge lists so details, security, and evidence flows
     do not overload the executive page. Cell IDs are page-prefixed to keep
     cross-page XML validation deterministic while each page remains readable.
+
+    ``pages`` may carry pre-built output from :func:`build_page_diagrams` to
+    avoid laying the model out twice when the caller also renders previews.
     """
 
-    pages = list(getattr(page_plan, "pages", []))
-    if not pages:
-        return generate_drawio_xml(diagram)
-
+    if pages is None:
+        pages = build_page_diagrams(diagram, page_plan)
     mxfile = ET.Element("mxfile", {"host": "app.diagrams.net", "agent": "enterprise-drawio-diagrammer"})
-    emitted = 0
-    for index, plan_page in enumerate(pages, start=1):
-        page_diagram = _diagram_for_plan_page(diagram, plan_page)
-        if emitted > 0 and not page_diagram.nodes and not page_diagram.edges:
-            continue
-        emitted += 1
-        laid_out = apply_layout(page_diagram)
-        laid_out.metadata = {**laid_out.metadata, "_laid_out": True}
-        _renumber_edges_per_page(laid_out)
-        prefix = f"p{emitted}_"
-        prefixed = _prefix_diagram_ids(laid_out, prefix)
-        _add_diagram_page(mxfile, prefixed, _page_name(str(getattr(plan_page, "title", f"Page {emitted}"))))
-    if emitted == 0:
-        return generate_drawio_xml(diagram)
+    for page_name, page_diagram in pages:
+        _add_diagram_page(mxfile, page_diagram, page_name)
     ET.indent(mxfile, space="  ")
     return ET.tostring(mxfile, encoding="unicode", short_empty_elements=True)
 
@@ -61,7 +193,8 @@ def _renumber_edges_per_page(diagram: Diagram) -> None:
 
 def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> None:
     laid_out = diagram if diagram.metadata.get("_laid_out") else apply_layout(diagram)
-    page_width, page_height = _page_size(laid_out)
+    furniture = compute_furniture(laid_out)
+    page_width, page_height = _page_size(laid_out, furniture)
     page = ET.SubElement(mxfile, "diagram", {"name": page_name})
     model = ET.SubElement(
         page,
@@ -88,17 +221,17 @@ def _add_diagram_page(mxfile: ET.Element, diagram: Diagram, page_name: str) -> N
     ET.SubElement(root, "mxCell", {"id": "0"})
     ET.SubElement(root, "mxCell", {"id": "1", "parent": "0"})
 
-    _add_title(root, laid_out)
+    boundary_by_id = {boundary.id: boundary for boundary in laid_out.boundaries}
+    _add_title(root, laid_out, furniture.title)
     for boundary in laid_out.boundaries:
         _add_boundary(root, boundary)
     for node in laid_out.nodes:
-        _add_node(root, node)
-    if laid_out.legends or _flow_legend_rows(laid_out.edges):
-        _add_legend(root, laid_out.legends, laid_out.edges, laid_out)
+        _add_node(root, node, boundary_by_id.get(node.group or ""))
+    if furniture.legend is not None:
+        _add_legend(root, laid_out, furniture.legend)
     for edge in laid_out.edges:
         _add_edge(root, edge)
-    _add_flow_badges(root, laid_out)
-    _add_page_notes(root, laid_out, page_height)
+    _add_page_notes(root, laid_out, furniture.notes)
 
 
 def _diagram_for_plan_page(diagram: Diagram, plan_page: Any) -> Diagram:
@@ -158,23 +291,42 @@ def _prefix_diagram_ids(diagram: Diagram, prefix: str) -> Diagram:
     return prefixed
 
 
-def _page_size(diagram: Diagram) -> tuple[int, int]:
-    max_x = 1169
-    max_y = 827
-    for boundary in diagram.boundaries:
-        max_x = max(max_x, (boundary.x or 0) + boundary.width + 80)
-        max_y = max(max_y, (boundary.y or 0) + boundary.height + 80)
-    for node in diagram.nodes:
-        max_x = max(max_x, (node.x or 0) + node.width + 80)
-        max_y = max(max_y, (node.y or 0) + node.height + 80)
-    legend_rows = ["Legend", *diagram.legends, *_flow_legend_rows(diagram.edges)]
-    if len(legend_rows) > 1:
-        max_x = max(max_x, 1300)
-        max_y = max(max_y, 105 + len(legend_rows) * 24)
-    page_notes = diagram.metadata.get("page_notes")
-    if isinstance(page_notes, list) and page_notes:
-        max_y = max(max_y, 185 + len(page_notes) * 24)
-    return max_x, max_y
+A4_LANDSCAPE = (1169, 826)
+A3_LANDSCAPE = (1654, 1169)
+
+
+def _page_size(diagram: Diagram, furniture: PageFurniture | None = None) -> tuple[int, int]:
+    """Smallest standard landscape page (A4 -> A3) that fits content + margins.
+
+    Only exceeds A3 when the content genuinely requires it (the CLI notes
+    oversized pages in render-qa.md via page_size_notes).
+    """
+
+    if furniture is None:
+        furniture = compute_furniture(diagram)
+    _, _, content_max_x, content_max_y = _content_bbox(diagram)
+    needed_x = content_max_x + 40
+    needed_y = content_max_y + 40
+    for box in (furniture.title, furniture.legend, furniture.notes):
+        if box is None:
+            continue
+        needed_x = max(needed_x, box.x + box.width + 40)
+        needed_y = max(needed_y, box.y + box.height + 40)
+    for width, height in (A4_LANDSCAPE, A3_LANDSCAPE):
+        if needed_x <= width and needed_y <= height:
+            return (width, height)
+    return (max(A3_LANDSCAPE[0], _snap_up(needed_x)), max(A3_LANDSCAPE[1], _snap_up(needed_y)))
+
+
+def page_size_notes(pages: list[tuple[str, Diagram]]) -> list[str]:
+    """Human-readable notes for pages that exceed A3 landscape."""
+
+    notes: list[str] = []
+    for page_name, diagram in pages:
+        width, height = _page_size(diagram)
+        if (width, height) not in (A4_LANDSCAPE, A3_LANDSCAPE):
+            notes.append(f"Page '{page_name}' exceeds A3 landscape: {width}x{height}px required by content.")
+    return notes
 
 
 def _page_name(title: str) -> str:
@@ -198,31 +350,35 @@ def _drawio_value(value: object) -> str:
     return "<br>".join(text.split("\n"))
 
 
-def _add_title(root: ET.Element, diagram: Diagram) -> None:
-    title_value = diagram.title if not diagram.subtitle else f"{diagram.title}\n{diagram.subtitle}"
+def _add_title(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__title",
-            "value": _drawio_value(title_value),
-            "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#1f2933;",
+            "value": _drawio_value(box.text),
+            "style": "text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontFamily=Helvetica;fontSize=20;fontStyle=1;fontColor=#1f2933;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "40", "y": "30", "width": "850", "height": "60", "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
 def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
-    style = _boundary_style(boundary)
+    """Emit a boundary as a genuine draw.io container with a title strip.
+
+    Dragging the boundary in draw.io moves its member nodes because members
+    carry parent=<boundary_id> with container-relative geometry.
+    """
+
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": boundary.id,
             "value": _drawio_value(boundary.label),
-            "style": style,
+            "style": _boundary_style(boundary),
             "vertex": "1",
             "parent": "1",
         },
@@ -240,10 +396,18 @@ def _add_boundary(root: ET.Element, boundary: Boundary) -> None:
     )
 
 
-def _add_node(root: ET.Element, node: Node) -> None:
-    style = get_icon_style(node.node_type, node.icon, node.label).drawio_style
+def _add_node(root: ET.Element, node: Node, boundary: Boundary | None = None) -> None:
+    visual = get_node_visual(node.node_type, node.icon, node.label)
+    style = visual.card_style
     if node.risk_level and node.risk_level.lower() in {"high", "critical"}:
         style += "strokeColor=#b85450;strokeWidth=2;"
+    x = node.x if node.x is not None else 80
+    y = node.y if node.y is not None else 160
+    parent = "1"
+    if boundary is not None and boundary.x is not None and boundary.y is not None:
+        parent = boundary.id
+        x -= boundary.x
+        y -= boundary.y
     cell = ET.SubElement(
         root,
         "mxCell",
@@ -252,30 +416,75 @@ def _add_node(root: ET.Element, node: Node) -> None:
             "value": _drawio_value(node.label),
             "style": style,
             "vertex": "1",
-            "parent": "1",
+            "parent": parent,
         },
     )
     ET.SubElement(
         cell,
         "mxGeometry",
         {
-            "x": str(node.x if node.x is not None else 80),
-            "y": str(node.y if node.y is not None else 160),
+            "x": str(x),
+            "y": str(y),
             "width": str(node.width),
             "height": str(node.height),
             "as": "geometry",
         },
     )
+    if visual.glyph_style:
+        _add_node_glyph(root, node, visual.glyph_style)
+
+
+def _add_node_glyph(root: ET.Element, node: Node, glyph_style: str) -> None:
+    """Fixed-size vendor glyph anchored to the card's top-right corner."""
+
+    glyph = ET.SubElement(
+        root,
+        "mxCell",
+        {
+            "id": f"{node.id}__icon",
+            "value": "",
+            "style": glyph_style,
+            "vertex": "1",
+            "connectable": "0",
+            "parent": node.id,
+        },
+    )
+    geometry = ET.SubElement(
+        glyph,
+        "mxGeometry",
+        {
+            "x": "1",
+            "width": str(GLYPH_SIZE),
+            "height": str(GLYPH_SIZE),
+            "relative": "1",
+            "as": "geometry",
+        },
+    )
+    ET.SubElement(geometry, "mxPoint", {"x": str(-(GLYPH_SIZE + 8)), "y": "8", "as": "offset"})
 
 
 def _add_edge(root: ET.Element, edge: Edge) -> None:
     style = edge.style or _edge_style(edge)
+    if not style.endswith(";"):
+        style += ";"
+    sequence = edge.metadata.get("sequence")
+    display_label = edge.metadata.get("display_label")
+    numbered = sequence is not None and display_label is None
+    value = "" if numbered else _drawio_value(_edge_value(edge))
+    if value:
+        style += "labelBackgroundColor=#ffffff;"
+    exit_port = edge.metadata.get("exit_port")
+    entry_port = edge.metadata.get("entry_port")
+    if isinstance(exit_port, (tuple, list)) and len(exit_port) == 2:
+        style += f"exitX={_style_number(exit_port[0])};exitY={_style_number(exit_port[1])};exitDx=0;exitDy=0;"
+    if isinstance(entry_port, (tuple, list)) and len(entry_port) == 2:
+        style += f"entryX={_style_number(entry_port[0])};entryY={_style_number(entry_port[1])};entryDx=0;entryDy=0;"
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": edge.id,
-            "value": _drawio_value(_edge_value(edge)),
+            "value": value,
             "style": style,
             "edge": "1",
             "parent": "1",
@@ -283,83 +492,78 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
             "target": edge.target,
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+    geometry = ET.SubElement(cell, "mxGeometry", {"relative": "1", "as": "geometry"})
+    waypoints = edge.metadata.get("waypoints")
+    if isinstance(waypoints, list) and waypoints:
+        array = ET.SubElement(geometry, "Array", {"as": "points"})
+        for point in waypoints:
+            ET.SubElement(array, "mxPoint", {"x": _style_number(point[0]), "y": _style_number(point[1])})
+    if numbered:
+        _add_edge_number_label(root, edge, str(sequence))
 
 
-def _add_flow_badges(root: ET.Element, diagram: Diagram) -> None:
-    nodes = {node.id: node for node in diagram.nodes}
-    cell_prefix = str(diagram.metadata.get("cell_prefix", ""))
-    for edge in diagram.edges:
-        sequence = edge.metadata.get("sequence")
-        source = nodes.get(edge.source)
-        target = nodes.get(edge.target)
-        if sequence is None or source is None or target is None:
-            continue
-        _add_flow_badge(root, edge, source, target, str(sequence), cell_prefix)
+def _add_edge_number_label(root: ET.Element, edge: Edge, value: str) -> None:
+    """One numbered pill that rides the edge route forever (single numbering mechanism).
 
+    The relative geometry's y is mxGraph's orthogonal offset in pixels, so the
+    pill floats beside the line instead of sitting on it.
+    """
 
-def _add_flow_badge(root: ET.Element, edge: Edge, source: Node, target: Node, value: str, cell_prefix: str = "") -> None:
-    size = 28
-    source_x = (source.x or 0) + source.width
-    source_y = (source.y or 0) + source.height // 2
-    target_x = target.x or 0
-    target_y = (target.y or 0) + target.height // 2
-    x = max(30, (source_x + target_x) // 2 - size // 2)
-    y = max(30, (source_y + target_y) // 2 - size // 2)
-    fill = _flow_color(edge)
-    cell = ET.SubElement(
+    label = ET.SubElement(
         root,
         "mxCell",
         {
-            "id": f"{cell_prefix}__badge_{edge.id}",
+            "id": f"{edge.id}__n",
             "value": _drawio_value(value),
             "style": (
-                "ellipse;whiteSpace=wrap;html=1;aspect=fixed;"
-                f"fillColor={fill};strokeColor=#ffffff;fontColor=#ffffff;fontStyle=1;fontSize=13;"
-                "align=center;verticalAlign=middle;spacing=0;"
+                "edgeLabel;html=1;rounded=1;fontFamily=Helvetica;"
+                f"fillColor={_flow_color(edge)};strokeColor=none;fontColor=#ffffff;"
+                "fontStyle=1;fontSize=12;align=center;verticalAlign=middle;spacing=4;"
             ),
             "vertex": "1",
-            "parent": "1",
+            "connectable": "0",
+            "parent": edge.id,
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": str(x), "y": str(y), "width": str(size), "height": str(size), "as": "geometry"})
+    ET.SubElement(label, "mxGeometry", {"x": "0", "y": "-14", "relative": "1", "as": "geometry"})
 
 
-def _add_legend(root: ET.Element, legends: list[LegendItem], edges: list[Edge], diagram: Diagram | None = None) -> None:
-    rows = ["Legend", *[f"{item.label}: {item.meaning}" for item in legends], *_flow_legend_rows(edges)]
-    value = "\n".join(rows)
-    cell_prefix = "" if diagram is None else str(diagram.metadata.get("cell_prefix", ""))
+def _style_number(value: float) -> str:
+    number = float(value)
+    return str(int(number)) if number == int(number) else f"{number:g}"
+
+
+def _add_legend(root: ET.Element, diagram: Diagram, box: FurnitureBox) -> None:
+    cell_prefix = str(diagram.metadata.get("cell_prefix", ""))
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{cell_prefix}__legend",
-            "value": _drawio_value(value),
-            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;",
+            "value": _drawio_value(box.text),
+            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#adb5bd;fontColor=#343a40;fontFamily=Helvetica;fontSize=12;align=left;spacingLeft=8;verticalAlign=top;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "900", "y": "30", "width": "320", "height": str(45 + len(rows) * 24), "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
-def _add_page_notes(root: ET.Element, diagram: Diagram, page_height: int) -> None:
-    notes = diagram.metadata.get("page_notes")
-    if not isinstance(notes, list) or not notes:
+def _add_page_notes(root: ET.Element, diagram: Diagram, box: FurnitureBox | None) -> None:
+    if box is None:
         return
-    value = "Page notes\n" + "\n".join(str(note) for note in notes)
     cell = ET.SubElement(
         root,
         "mxCell",
         {
             "id": f"{diagram.metadata.get('cell_prefix', '')}__page_notes",
-            "value": _drawio_value(value),
-            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
+            "value": _drawio_value(box.text),
+            "style": "rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;fontColor=#343a40;fontFamily=Helvetica;align=left;spacingLeft=8;verticalAlign=top;fontSize=12;",
             "vertex": "1",
             "parent": "1",
         },
     )
-    ET.SubElement(cell, "mxGeometry", {"x": "40", "y": str(max(120, page_height - 105)), "width": "760", "height": str(45 + len(notes) * 22), "as": "geometry"})
+    ET.SubElement(cell, "mxGeometry", {"x": str(box.x), "y": str(box.y), "width": str(box.width), "height": str(box.height), "as": "geometry"})
 
 
 
@@ -368,9 +572,10 @@ def _boundary_style(boundary: Boundary) -> str:
     stroke = "#dc2626" if boundary_type in {"trust", "security"} else "#6c757d"
     fill = "#fffafa" if boundary_type in {"trust", "security"} else "#f8fbff"
     return (
-        "rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;"
-        f"fillColor={fill};strokeColor={stroke};verticalAlign=top;align=left;"
-        "spacingTop=10;spacingLeft=12;fontStyle=1;fontColor=#343a40;"
+        "swimlane;html=1;rounded=1;startSize=32;container=1;collapsible=0;"
+        "dashed=1;dashPattern=8 4;whiteSpace=wrap;"
+        f"fillColor={fill};swimlaneFillColor={fill};strokeColor={stroke};"
+        "align=left;spacingLeft=12;fontStyle=1;fontColor=#343a40;fontFamily=Helvetica;fontSize=13;"
     )
 
 
@@ -379,8 +584,9 @@ def _edge_style(edge: Edge) -> str:
     stroke = _flow_color(edge)
     dashed = "dashed=1;dashPattern=8 4;" if flow_type in {"optional_storage", "security_sensitive"} else ""
     return (
-        "edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;"
-        f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;strokeWidth=2;"
+        "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;"
+        f"html=1;endArrow=block;endFill=1;strokeColor={stroke};fontColor=#343a40;"
+        f"fontFamily=Helvetica;strokeWidth=1.5;"
         f"{dashed}"
     )
 

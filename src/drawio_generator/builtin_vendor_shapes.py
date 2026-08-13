@@ -15,6 +15,19 @@ service names.
 The shape strings use the same ``shape=mxgraph.<family>.<name>`` references
 diagrams.net itself emits when those vendor shape libraries are loaded, so
 diagrams open correctly in both the desktop app and ``app.diagrams.net``.
+
+Since the card-grammar pass, these styles are consumed only as fixed-size
+40x40 ``aspect=fixed`` glyph children of near-white node cards (see
+``icon_registry.get_node_visual``) - never stretched to node size.
+
+Azure services prefer the modern colorful ``img/lib/azure2/*`` image shapes
+(the 2019+ Azure icon set bundled with diagrams.net). Every path in
+``_AZURE2_IMAGES`` was verified in a real diagrams.net instance
+(app.diagrams.net, 2026-08-12): each returned HTTP 200 with SVG content and
+rendered correctly on canvas. Unverified services keep the legacy
+``mxgraph.azure.*`` stencils - a dated glyph beats a blank box. Known
+azure2 gaps at verification time (all 404): Azure_Backup_Center,
+Azure_Pipelines, Azure_Repos.
 """
 
 from __future__ import annotations
@@ -37,7 +50,7 @@ class BuiltinShape:
 # ---------------------------------------------------------------------------
 
 _AZURE_STYLE_TEMPLATE = (
-    "sketch=0;outlineConnect=0;fontColor=#23A2D9;gradientColor=none;"
+    "sketch=0;outlineConnect=0;fontColor=#212529;gradientColor=none;"
     "fillColor=#0072C6;strokeColor=#0072C6;dashed=0;"
     "verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;"
     "fontSize=12;shape=mxgraph.azure.{shape};"
@@ -70,6 +83,8 @@ _AZURE_SHAPES: dict[str, str] = {
     "front door": "front_doors",
     "azure application gateway": "application_gateways",
     "application gateway": "application_gateways",
+    "application gateway waf": "application_gateways",
+    "azure application gateway waf": "application_gateways",
     "azure load balancer": "load_balancers",
     "azure traffic manager": "traffic_manager_profiles",
     "traffic manager": "traffic_manager_profiles",
@@ -153,6 +168,69 @@ _AZURE_SHAPES: dict[str, str] = {
     "azure openai": "cognitive_services",
     "azure cognitive services": "cognitive_services",
     "azure machine learning": "machine_learning",
+}
+
+_AZURE2_STYLE_TEMPLATE = (
+    "image;sketch=0;aspect=fixed;html=1;points=[];align=center;fontSize=12;"
+    "image=img/lib/azure2/{path};"
+)
+
+# legacy mxgraph.azure shape suffix -> verified azure2 image path.
+# Only entries verified to render in a real diagrams.net instance belong here.
+_AZURE2_IMAGES: dict[str, str] = {
+    "kubernetes_services": "containers/Kubernetes_Services.svg",
+    "app_services": "app_services/App_Services.svg",
+    "function_apps": "compute/Function_Apps.svg",
+    "container_instances": "containers/Container_Instances.svg",
+    "container_registries": "containers/Container_Registries.svg",
+    "batch_accounts": "compute/Batch_Accounts.svg",
+    "virtual_machine": "compute/Virtual_Machine.svg",
+    "vm_scale_sets": "compute/VM_Scale_Sets.svg",
+    "service_fabric_clusters": "compute/Service_Fabric_Clusters.svg",
+    "front_doors": "networking/Front_Doors.svg",
+    "application_gateways": "networking/Application_Gateways.svg",
+    "load_balancers": "networking/Load_Balancers.svg",
+    "traffic_manager_profiles": "networking/Traffic_Manager_Profiles.svg",
+    "cdn_profiles": "networking/CDN_Profiles.svg",
+    "dns_zones": "networking/DNS_Zones.svg",
+    "virtual_networks": "networking/Virtual_Networks.svg",
+    "firewalls": "networking/Firewalls.svg",
+    "bastions": "networking/Bastions.svg",
+    "vpn_gateways": "networking/Virtual_Network_Gateways.svg",
+    "expressroute_circuits": "networking/ExpressRoute_Circuits.svg",
+    "nat": "networking/NAT.svg",
+    "private_link": "networking/Private_Link.svg",
+    "private_endpoint": "networking/Private_Endpoint.svg",
+    "ddos_protection_plans": "networking/DDoS_Protection_Plans.svg",
+    "web_application_firewall_policies(waf)": "networking/Web_Application_Firewall_Policies_WAF.svg",
+    "azure_database_postgresql_server": "databases/Azure_Database_PostgreSQL_Server.svg",
+    "azure_database_mysql_server": "databases/Azure_Database_MySQL_Server.svg",
+    "azure_database_mariadb_server": "databases/Azure_Database_MariaDB_Server.svg",
+    "sql_database": "databases/SQL_Database.svg",
+    "sql_managed_instance": "databases/SQL_Managed_Instance.svg",
+    "azure_synapse_analytics": "analytics/Azure_Synapse_Analytics.svg",
+    "cosmos_db": "databases/Azure_Cosmos_DB.svg",
+    "cache_redis": "databases/Cache_Redis.svg",
+    "data_lake_storage_gen1": "storage/Data_Lake_Storage_Gen1.svg",
+    "data_factory": "databases/Data_Factory.svg",
+    "azure_databricks": "analytics/Azure_Databricks.svg",
+    "storage_accounts": "storage/Storage_Accounts.svg",
+    "site_recovery_vault": "storage/Recovery_Services_Vaults.svg",
+    "service_bus": "integration/Service_Bus.svg",
+    "event_hubs": "analytics/Event_Hubs.svg",
+    "event_grid_topics": "integration/Event_Grid_Topics.svg",
+    "api_management_services": "app_services/API_Management_Services.svg",
+    "logic_apps": "integration/Logic_Apps.svg",
+    "azure_active_directory": "identity/Azure_Active_Directory.svg",
+    "key_vaults": "security/Key_Vaults.svg",
+    "managed_identities": "identity/Managed_Identities.svg",
+    "azure_sentinel": "security/Azure_Sentinel.svg",
+    "policy": "management_governance/Policy.svg",
+    "monitor": "management_governance/Monitor.svg",
+    "log_analytics_workspaces": "analytics/Log_Analytics_Workspaces.svg",
+    "application_insights": "devops/Application_Insights.svg",
+    "automation_accounts": "management_governance/Automation_Accounts.svg",
+    "resource_groups": "general/Resource_Groups.svg",
 }
 
 _AZURE_CATEGORY_HINTS: dict[str, str] = {
@@ -505,9 +583,15 @@ def lookup(vendor: str, key: str) -> BuiltinShape | None:
         if shape is None:
             return None
         category = _AZURE_CATEGORY_HINTS.get(shape, "azure")
+        azure2_path = _AZURE2_IMAGES.get(shape)
+        style = (
+            _AZURE2_STYLE_TEMPLATE.format(path=azure2_path)
+            if azure2_path is not None
+            else _AZURE_STYLE_TEMPLATE.format(shape=shape)
+        )
         return BuiltinShape(
             vendor="azure",
-            drawio_style=_AZURE_STYLE_TEMPLATE.format(shape=shape),
+            drawio_style=style,
             label=_humanize(normalized),
             category=f"azure-{category}",
         )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
@@ -108,10 +109,7 @@ ALIASES: dict[str, str] = {
     "jenkins": "process",
     "prometheus": "monitoring",
     "grafana": "dashboard",
-    "log analytics": "logging",
     "opentelemetry collector": "monitoring",
-    "application gateway": "gateway",
-    "azure front door": "cdn",
     "excel": "workbook",
     "excel workbook": "workbook",
     "workbook": "workbook",
@@ -336,6 +334,176 @@ def get_icon_style(
     if fallback_vendor:
         return _with_vendor(IconStyle("fallback", DEFAULT_STYLE, "Component"), fallback_vendor)
     return IconStyle("fallback", DEFAULT_STYLE, "Component")
+
+
+_VENDOR_LABEL_PREFIXES = ("azure ", "aws ", "amazon ", "google cloud ", "gcp ", "microsoft ")
+
+
+def canonical_component_key(label: str) -> str:
+    """Canonical identity for a component label, for synonym-safe dedupe.
+
+    Two labels that resolve to the same built-in vendor stencil are the same
+    component ("Application Gateway WAF" == "Azure Application Gateway").
+    Unrecognized labels fall back to a vendor-prefix-stripped slug so
+    "Azure Foo" and "Foo" still merge.
+    """
+
+    lowered = " ".join(label.strip().lower().split())
+    for vendor in ("azure", "aws", "gcp", "kubernetes"):
+        match = builtin_vendor_shapes.lookup(vendor, lowered)
+        if match is not None:
+            return f"{vendor}:{match.drawio_style}"
+    stripped = lowered
+    for prefix in _VENDOR_LABEL_PREFIXES:
+        if stripped.startswith(prefix):
+            stripped = stripped[len(prefix):]
+            break
+    slug = re.sub(r"[^a-z0-9]+", "-", stripped).strip("-")
+    return f"label:{slug or lowered}"
+
+
+CARD_FILL = "#ffffff"
+CARD_FONT_COLOR = "#212529"
+GLYPH_SIZE = 40
+
+# One muted stroke per broad category; semantics ride on edge colors,
+# boundary strokes, and glyphs - not rainbow node fills.
+CATEGORY_STROKES: dict[str, str] = {
+    "application": "#6c8ebf",
+    "workflow": "#82b366",
+    "operations": "#82b366",
+    "data": "#d6b656",
+    "security": "#9673a6",
+    "devops": "#9673a6",
+    "network": "#6c8ebf",
+    "cloud": "#6c8ebf",
+    "platform": "#6c8ebf",
+    "infrastructure": "#666666",
+    "general": "#6c757d",
+}
+DEFAULT_STROKE = "#6c757d"
+
+
+@dataclass(frozen=True, slots=True)
+class NodeVisual:
+    """Uniform card grammar for a node: near-white card + optional glyph child."""
+
+    card_style: str
+    glyph_style: str | None
+    category: str
+    vendor: str | None
+    official: bool
+    license_notice: str
+
+
+def card_style(category: str, has_glyph: bool) -> str:
+    base = category.split("-", 1)[0]
+    stroke = CATEGORY_STROKES.get(category, CATEGORY_STROKES.get(base, DEFAULT_STROKE))
+    spacing_right = f"spacingRight={GLYPH_SIZE + 16};" if has_glyph else ""
+    return (
+        f"rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor={CARD_FILL};"
+        f"strokeColor={stroke};strokeWidth=1;fontColor={CARD_FONT_COLOR};"
+        f"fontFamily=Helvetica;fontSize=13;align=left;verticalAlign=middle;"
+        f"spacingLeft=12;{spacing_right}"
+    )
+
+
+# Brand glyphs for non-cloud tools that diagrams.net actually bundles,
+# verified in a live app.diagrams.net instance (2026-08-12):
+# mxgraph.weblogos.github is a registered stencil; mscae/Docker.svg serves
+# HTTP 200 with SVG content. Terraform, Prometheus, Grafana, Jenkins,
+# GitLab, Ansible, Kafka, Helm, and ArgoCD have no bundled artwork in
+# diagrams.net (all probed 404/unregistered) - those tools keep a clean
+# card; a licensed icon pack under stencils/<vendor>/manifest.json is the
+# supported way to add their logos.
+_TOOL_GLYPHS: tuple[tuple[str, str], ...] = (
+    ("github", "shape=mxgraph.weblogos.github;html=1;fillColor=#181717;strokeColor=none;"),
+    ("docker", "image;sketch=0;aspect=fixed;html=1;points=[];align=center;image=img/lib/mscae/Docker.svg;"),
+)
+
+
+def _tool_glyph(*candidates: str | None) -> str | None:
+    for candidate in candidates:
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        for needle, style in _TOOL_GLYPHS:
+            if needle in lowered:
+                return style
+    return None
+
+
+def _explicit_icon_style(icon: str | None) -> str | None:
+    """Accept an icon the agent found via draw.io's own shape search.
+
+    The node's ``icon`` field may carry, besides a plain service name:
+    - a full draw.io style string (contains ``shape=`` or ``image=``),
+    - a bare stencil reference like ``mxgraph.weblogos.github``,
+    - a bundled image path like ``img/lib/azure2/devops/Azure_DevOps.svg``
+      (the ``img/lib/`` prefix may be omitted).
+    Anything else is treated as a service name and resolved normally.
+    """
+
+    if not icon:
+        return None
+    text = icon.strip()
+    if "shape=" in text or "image=" in text:
+        return text if text.endswith(";") else text + ";"
+    if text.startswith("mxgraph.") and " " not in text:
+        return f"shape={text};html=1;"
+    if text.endswith(".svg") and "/" in text and " " not in text:
+        path = text if text.startswith("img/") else f"img/lib/{text}"
+        return f"image;sketch=0;aspect=fixed;html=1;points=[];align=center;image={path};"
+    return None
+
+
+def _glyph_style(resolved_style: str) -> str | None:
+    """Turn a resolved shape style into a fixed-size glyph-child style.
+
+    Only styles that reference an actual shape or image become glyphs; plain
+    colored rectangles carry no extra information beyond the card itself.
+    Stencils are never stretched: the glyph is always emitted at GLYPH_SIZE
+    with aspect=fixed, and label-below positioning is stripped because glyph
+    children have no label.
+    """
+
+    if "shape=" not in resolved_style and "image=" not in resolved_style:
+        return None
+    style = resolved_style.replace("verticalLabelPosition=bottom;", "").replace("verticalAlign=top;", "")
+    if not style.endswith(";"):
+        style += ";"
+    if "aspect=fixed" not in style:
+        style += "aspect=fixed;"
+    return style
+
+
+def get_node_visual(
+    node_type: str | None,
+    icon: str | None = None,
+    label: str | None = None,
+) -> NodeVisual:
+    """Resolve a node to the uniform card grammar.
+
+    The card is always a near-white rounded rectangle with the label inside;
+    a recognized vendor or built-in shape becomes a 40x40 aspect-fixed glyph
+    child anchored to the card's top-right corner.
+    """
+
+    resolved = get_icon_style(node_type, icon, label)
+    # Precedence: an icon the agent explicitly chose (e.g. found via draw.io
+    # shape search) > a tool's own brand mark > the resolved service shape.
+    explicit = _explicit_icon_style(icon)
+    tool = _tool_glyph(icon, label) if explicit is None else None
+    glyph_source = explicit or tool or resolved.drawio_style
+    glyph = _glyph_style(glyph_source)
+    return NodeVisual(
+        card_style=card_style(resolved.category, glyph is not None),
+        glyph_style=glyph,
+        category=resolved.category,
+        vendor=resolved.vendor,
+        official=resolved.official,
+        license_notice=resolved.license_notice,
+    )
 
 
 def supported_categories() -> dict[str, list[str]]:
