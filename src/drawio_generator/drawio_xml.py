@@ -503,7 +503,11 @@ def _add_edge(root: ET.Element, edge: Edge) -> None:
 
 
 def _add_edge_number_label(root: ET.Element, edge: Edge, value: str) -> None:
-    """One numbered pill that rides the edge route forever (single numbering mechanism)."""
+    """One numbered pill that rides the edge route forever (single numbering mechanism).
+
+    The relative geometry's y is mxGraph's orthogonal offset in pixels, so the
+    pill floats beside the line instead of sitting on it.
+    """
 
     label = ET.SubElement(
         root,
@@ -521,7 +525,7 @@ def _add_edge_number_label(root: ET.Element, edge: Edge, value: str) -> None:
             "parent": edge.id,
         },
     )
-    ET.SubElement(label, "mxGeometry", {"relative": "1", "as": "geometry"})
+    ET.SubElement(label, "mxGeometry", {"x": "0", "y": "-14", "relative": "1", "as": "geometry"})
 
 
 def _style_number(value: float) -> str:

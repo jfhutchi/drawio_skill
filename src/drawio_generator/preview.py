@@ -289,20 +289,59 @@ def _add_edge_shapes(shapes: list[Shape], edge: Edge, nodes_by_id: dict[str, Nod
     shapes.append(Shape("polygon", "edge-arrow", _arrow_head(points[-2], points[-1]), fill=color))
     label = str(_edge_value(edge))
     if label:
-        mid = route_midpoint(points)
-        shapes.append(
-            Shape(
-                "text",
-                "edge-label",
-                ((mid[0], mid[1] - 4.0),),
-                text=label,
-                font_size=EDGE_FONT_SIZE,
-                bold=True,
-                fill=color,
-                anchor="middle",
+        mid, normal = _midpoint_normal(points)
+        cx = mid[0] + normal[0] * 14.0
+        cy = mid[1] + normal[1] * 14.0
+        if label.isdigit():
+            # Mirror the emitted pill: flow-colored capsule, white number,
+            # floated off the line so it stays readable.
+            pill_width = max(18.0, 6.0 + len(label) * 7.0)
+            shapes.append(Shape("rect", "edge-label-pill", ((cx - pill_width / 2.0, cy - 9.0), (pill_width, 18.0)), fill=color))
+            shapes.append(
+                Shape(
+                    "text",
+                    "edge-label",
+                    ((cx, cy + 4.0),),
+                    text=label,
+                    font_size=EDGE_FONT_SIZE,
+                    bold=True,
+                    fill="#ffffff",
+                    anchor="middle",
+                )
             )
-        )
+        else:
+            shapes.append(
+                Shape(
+                    "text",
+                    "edge-label",
+                    ((cx, cy + 4.0),),
+                    text=label,
+                    font_size=EDGE_FONT_SIZE,
+                    bold=True,
+                    fill=color,
+                    anchor="middle",
+                )
+            )
     return True
+
+
+def _midpoint_normal(points: list[tuple[float, float]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Route midpoint plus the unit normal of its segment (pointing up/right)."""
+
+    mid = route_midpoint(points)
+    segments = list(zip(points, points[1:]))
+    remaining = sum(((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5 for (ax, ay), (bx, by) in segments) / 2.0
+    direction = (1.0, 0.0)
+    for (ax, ay), (bx, by) in segments:
+        seg_len = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+        if seg_len >= remaining and seg_len > 0:
+            direction = ((bx - ax) / seg_len, (by - ay) / seg_len)
+            break
+        remaining -= seg_len
+    normal = (-direction[1], direction[0])
+    if normal[1] > 0 or (normal[1] == 0 and normal[0] < 0):
+        normal = (-normal[0], -normal[1])
+    return mid, normal
 
 
 def _arrow_head(before: tuple[float, float], tip: tuple[float, float]) -> tuple[tuple[float, float], ...]:

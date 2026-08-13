@@ -139,6 +139,10 @@ class DrawioXmlTests(unittest.TestCase):
         self.assertIn("fillColor=#4f46e5", control_label.attrib["style"])
         self.assertEqual("edge-control", control_label.attrib["parent"])
         self.assertEqual("0", control_label.attrib["connectable"])
+        # Orthogonal offset floats the pill beside the line, not on it.
+        label_geometry = control_label.find("mxGeometry")
+        self.assertEqual("-14", label_geometry.attrib.get("y"))
+        self.assertEqual("1", label_geometry.attrib.get("relative"))
         self.assertEqual("2", cells["edge-collect__n"].attrib["value"])
         self.assertIn("fillColor=#2f9e44", cells["edge-collect__n"].attrib["style"])
         self.assertFalse(any("__badge_" in cell_id for cell_id in cells if cell_id))
