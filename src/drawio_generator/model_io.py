@@ -189,11 +189,15 @@ def validate_model_payload(payload: Any) -> list[str]:
             route_edge_ids = route.get("edge_ids")
             if not isinstance(route_edge_ids, list):
                 continue
-            missing = [edge_id for edge_id in route_edge_ids if edge_id not in edge_lookup]
+            valid_edge_ids = [
+                edge_id for edge_id in route_edge_ids
+                if isinstance(edge_id, str) and edge_id.strip()
+            ]
+            missing = [edge_id for edge_id in valid_edge_ids if edge_id not in edge_lookup]
             for edge_id in missing:
                 errors.append(f"$.routes[{index}].edge_ids: references missing edge id {edge_id!r}")
-            if not missing:
-                errors.extend(_validate_route_chain(route_edge_ids, edge_lookup, f"$.routes[{index}].edge_ids"))
+            if len(valid_edge_ids) == len(route_edge_ids) and not missing:
+                errors.extend(_validate_route_chain(valid_edge_ids, edge_lookup, f"$.routes[{index}].edge_ids"))
 
     return errors
 
