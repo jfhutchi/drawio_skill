@@ -41,6 +41,17 @@ edges:
     metadata:
       sequence: 1          # optional flow number; renumbered 1..n per page
       flow_type: control   # control | target_collection | report_evidence | optional_storage | security_sensitive
+routes:
+  - id: request-route
+    label: User Request
+    edge_ids: [edge-example]  # ordered edge ids; adjacent edges must form a contiguous path
+    description: Optional presentation description for the route journey.
+    animation:
+      style: both          # both | packet | flow
+      speed: 1.0           # route-specific multiplier; viewer also offers 0.5x/1x/2x
+      dwell_ms: 350        # pause after arriving at each node
+      loop: false          # false keeps playback finite by default
+    metadata: {}
 legends:
   - label: Blue
     meaning: Application, platform, and network services
