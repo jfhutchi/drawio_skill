@@ -1,12 +1,15 @@
 [project]
 name = "enterprise-drawio-diagrammer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent skill and Python helper for enterprise diagrams.net draw.io diagrams."
 requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
 preview = ["Pillow"]
+
+[project.scripts]
+drawio-interactive = "drawio_generator.interactive_html:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
