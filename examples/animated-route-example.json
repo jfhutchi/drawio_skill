@@ -1,0 +1,88 @@
+{
+  "title": "Animated Web Request",
+  "subtitle": "Route Journey Example",
+  "diagram_type": "cloud",
+  "audience": "architect",
+  "direction": "left-to-right",
+  "layout_strategy": "layered",
+  "nodes": [
+    {
+      "id": "user",
+      "label": "User",
+      "node_type": "user",
+      "layer": "client"
+    },
+    {
+      "id": "frontdoor",
+      "label": "Azure Front Door",
+      "node_type": "load_balancer",
+      "icon": "azure front door",
+      "layer": "edge"
+    },
+    {
+      "id": "app",
+      "label": "Application",
+      "node_type": "api",
+      "layer": "application"
+    },
+    {
+      "id": "sql",
+      "label": "SQL Database",
+      "node_type": "database",
+      "icon": "azure sql database",
+      "layer": "data"
+    }
+  ],
+  "edges": [
+    {
+      "id": "user-frontdoor",
+      "source": "user",
+      "target": "frontdoor",
+      "label": "HTTPS request",
+      "protocol": "HTTPS :443",
+      "security_control": "TLS"
+    },
+    {
+      "id": "frontdoor-app",
+      "source": "frontdoor",
+      "target": "app",
+      "label": "Forward request",
+      "protocol": "HTTPS :443",
+      "security_control": "WAF + TLS"
+    },
+    {
+      "id": "sql-app",
+      "source": "sql",
+      "target": "app",
+      "label": "Database session",
+      "protocol": "TDS :1433",
+      "data_classification": "internal",
+      "security_control": "TLS"
+    }
+  ],
+  "routes": [
+    {
+      "id": "user-request",
+      "label": "User Request",
+      "edge_ids": [
+        "user-frontdoor",
+        "frontdoor-app",
+        "sql-app"
+      ],
+      "description": "Trace the user request from the edge through the application to SQL.",
+      "animation": {
+        "style": "both",
+        "speed": 1.0,
+        "dwell_ms": 350,
+        "loop": false
+      }
+    }
+  ],
+  "legends": [],
+  "annotations": [],
+  "assumptions": [],
+  "unknowns": [],
+  "sources": [],
+  "quality_checks": [],
+  "metadata": {}
+}

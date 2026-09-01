@@ -16,7 +16,16 @@ from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
-from .diagram_model import Annotation, Boundary, Diagram, Edge, LegendItem, Node
+from .diagram_model import (
+    Annotation,
+    Boundary,
+    Diagram,
+    Edge,
+    LegendItem,
+    Node,
+    Route,
+    RouteAnimation,
+)
 
 
 class ModelValidationError(ValueError):
@@ -32,6 +41,8 @@ _STR_LIST_FIELDS = {"layers", "groups", "assumptions", "unknowns", "sources", "q
 
 _NODE_FIELDS = {field.name for field in fields(Node)}
 _EDGE_FIELDS = {field.name for field in fields(Edge)}
+_ROUTE_FIELDS = {field.name for field in fields(Route)}
+_ROUTE_ANIMATION_FIELDS = {field.name for field in fields(RouteAnimation)}
 _BOUNDARY_FIELDS = {field.name for field in fields(Boundary)}
 _LEGEND_FIELDS = {field.name for field in fields(LegendItem)}
 _ANNOTATION_FIELDS = {field.name for field in fields(Annotation)}
@@ -65,6 +76,12 @@ def diagram_from_dict(payload: Any) -> Diagram:
     if errors:
         raise ModelValidationError(errors)
 
+    routes: list[Route] = []
+    for item in payload.get("routes", []):
+        animation = RouteAnimation(**item.get("animation", {}))
+        route_values = {key: value for key, value in item.items() if key != "animation"}
+        routes.append(Route(**route_values, animation=animation))
+
     return Diagram(
         title=payload["title"],
         subtitle=payload.get("subtitle", ""),
@@ -77,6 +94,7 @@ def diagram_from_dict(payload: Any) -> Diagram:
         boundaries=[Boundary(**item) for item in payload.get("boundaries", [])],
         nodes=[Node(**item) for item in payload.get("nodes", [])],
         edges=[Edge(**item) for item in payload.get("edges", [])],
+        routes=routes,
         legends=[LegendItem(**item) for item in payload.get("legends", [])],
         annotations=[Annotation(**item) for item in payload.get("annotations", [])],
         assumptions=list(payload.get("assumptions", [])),
@@ -118,6 +136,7 @@ def validate_model_payload(payload: Any) -> list[str]:
     boundary_ids = _validate_items(payload, "boundaries", _BOUNDARY_FIELDS, {"id", "label"}, errors)
     node_ids = _validate_items(payload, "nodes", _NODE_FIELDS, {"id", "label"}, errors)
     edge_ids = _validate_items(payload, "edges", _EDGE_FIELDS, {"id", "source", "target", "label"}, errors)
+    route_ids = _validate_routes(payload, errors)
     annotation_ids = _validate_items(payload, "annotations", _ANNOTATION_FIELDS, {"id", "text"}, errors)
     _validate_items(payload, "legends", _LEGEND_FIELDS, {"label", "meaning"}, errors, id_field=None)
 
@@ -126,6 +145,7 @@ def validate_model_payload(payload: Any) -> list[str]:
         ("boundaries", boundary_ids),
         ("nodes", node_ids),
         ("edges", edge_ids),
+        ("routes", route_ids),
         ("annotations", annotation_ids),
     ):
         for index, item_id in ids:
@@ -156,7 +176,118 @@ def validate_model_payload(payload: Any) -> list[str]:
             if isinstance(group, str) and group and group not in boundary_id_set:
                 errors.append(f"$.nodes[{index}].group: references missing boundary id {group!r}")
 
+    edge_lookup = {
+        edge.get("id"): edge
+        for edge in edges
+        if isinstance(edge, dict) and isinstance(edge.get("id"), str) and edge.get("id")
+    }
+    routes = payload.get("routes", [])
+    if isinstance(routes, list):
+        for index, route in enumerate(routes):
+            if not isinstance(route, dict):
+                continue
+            route_edge_ids = route.get("edge_ids")
+            if not isinstance(route_edge_ids, list):
+                continue
+            valid_edge_ids = [
+                edge_id for edge_id in route_edge_ids
+                if isinstance(edge_id, str) and edge_id.strip()
+            ]
+            missing = [edge_id for edge_id in valid_edge_ids if edge_id not in edge_lookup]
+            for edge_id in missing:
+                errors.append(f"$.routes[{index}].edge_ids: references missing edge id {edge_id!r}")
+            if len(valid_edge_ids) == len(route_edge_ids) and not missing:
+                errors.extend(_validate_route_chain(valid_edge_ids, edge_lookup, f"$.routes[{index}].edge_ids"))
+
     return errors
+
+
+def _validate_routes(payload: dict[str, Any], errors: list[str]) -> list[tuple[int, str]]:
+    value = payload.get("routes", [])
+    if not isinstance(value, list):
+        errors.append("$.routes: must be a list")
+        return []
+
+    ids: list[tuple[int, str]] = []
+    for index, item in enumerate(value):
+        path = f"$.routes[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path}: must be an object")
+            continue
+        for key in item:
+            if key not in _ROUTE_FIELDS:
+                errors.append(f"{path}.{key}: unknown field (valid fields: {', '.join(sorted(_ROUTE_FIELDS))})")
+        for name in ("id", "label"):
+            field_value = item.get(name)
+            if not isinstance(field_value, str) or not field_value.strip():
+                errors.append(f"{path}.{name}: required non-empty string")
+        edge_ids = item.get("edge_ids")
+        if not isinstance(edge_ids, list) or not edge_ids:
+            errors.append(f"{path}.edge_ids: required non-empty list of edge ids")
+        elif any(not isinstance(edge_id, str) or not edge_id.strip() for edge_id in edge_ids):
+            errors.append(f"{path}.edge_ids: all edge ids must be non-empty strings")
+        description = item.get("description")
+        if description is not None and not isinstance(description, str):
+            errors.append(f"{path}.description: must be a string or null")
+        if "metadata" in item and not isinstance(item["metadata"], dict):
+            errors.append(f"{path}.metadata: must be an object")
+        _validate_route_animation(item.get("animation", {}), f"{path}.animation", errors)
+        if isinstance(item.get("id"), str) and item["id"].strip():
+            ids.append((index, item["id"]))
+    return ids
+
+
+def _validate_route_animation(value: Any, path: str, errors: list[str]) -> None:
+    if not isinstance(value, dict):
+        errors.append(f"{path}: must be an object")
+        return
+    for key in value:
+        if key not in _ROUTE_ANIMATION_FIELDS:
+            errors.append(
+                f"{path}.{key}: unknown field (valid fields: {', '.join(sorted(_ROUTE_ANIMATION_FIELDS))})"
+            )
+    style = value.get("style", "both")
+    if not isinstance(style, str) or style not in {"both", "packet", "flow"}:
+        errors.append(f"{path}.style: must be one of both, packet, flow")
+    speed = value.get("speed", 1.0)
+    if isinstance(speed, bool) or not isinstance(speed, (int, float)) or speed <= 0 or speed > 10:
+        errors.append(f"{path}.speed: must be a number greater than 0 and at most 10")
+    dwell_ms = value.get("dwell_ms", 350)
+    if isinstance(dwell_ms, bool) or not isinstance(dwell_ms, int) or dwell_ms < 0 or dwell_ms > 60000:
+        errors.append(f"{path}.dwell_ms: must be an integer between 0 and 60000")
+    loop = value.get("loop", False)
+    if not isinstance(loop, bool):
+        errors.append(f"{path}.loop: must be a boolean")
+
+
+def _validate_route_chain(
+    edge_ids: list[str],
+    edge_lookup: dict[str, dict[str, Any]],
+    path: str,
+) -> list[str]:
+    if len(edge_ids) < 2:
+        return []
+
+    first = edge_lookup[edge_ids[0]]
+    second = edge_lookup[edge_ids[1]]
+    first_nodes = {first.get("source"), first.get("target")}
+    second_nodes = {second.get("source"), second.get("target")}
+    shared = {node for node in first_nodes & second_nodes if isinstance(node, str)}
+    if not shared:
+        return [f"{path}: edge {edge_ids[0]!r} and {edge_ids[1]!r} are not contiguous"]
+
+    current = first.get("target") if first.get("target") in shared else sorted(shared)[0]
+    for position, edge_id in enumerate(edge_ids[1:], start=1):
+        edge = edge_lookup[edge_id]
+        if current == edge.get("source"):
+            current = edge.get("target")
+        elif current == edge.get("target"):
+            current = edge.get("source")
+        else:
+            return [
+                f"{path}: edge {edge_id!r} at position {position} does not continue from node {current!r}"
+            ]
+    return []
 
 
 def _validate_items(

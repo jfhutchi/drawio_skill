@@ -3,34 +3,107 @@
   "title": "Enterprise Draw.io Diagram Model",
   "description": "Structural schema for the intermediate Diagram model consumed by --model. Matches src/drawio_generator/diagram_model.py exactly; the CLI validates with a built-in structural validator, not this file.",
   "type": "object",
-  "required": ["title", "nodes", "edges"],
+  "required": [
+    "title",
+    "nodes",
+    "edges"
+  ],
   "additionalProperties": false,
   "properties": {
-    "title": {"type": "string", "minLength": 1},
-    "subtitle": {"type": "string", "default": ""},
-    "diagram_type": {"type": "string", "default": "enterprise"},
-    "audience": {"type": "string", "default": "architect"},
-    "direction": {"type": "string", "default": "top-to-bottom"},
-    "layout_strategy": {"type": "string", "default": "layered"},
-    "layers": {"type": "array", "items": {"type": "string"}, "default": []},
-    "groups": {"type": "array", "items": {"type": "string"}, "default": []},
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subtitle": {
+      "type": "string",
+      "default": ""
+    },
+    "diagram_type": {
+      "type": "string",
+      "default": "enterprise"
+    },
+    "audience": {
+      "type": "string",
+      "default": "architect"
+    },
+    "direction": {
+      "type": "string",
+      "default": "top-to-bottom"
+    },
+    "layout_strategy": {
+      "type": "string",
+      "default": "layered"
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
     "boundaries": {
       "type": "array",
       "default": [],
       "items": {
         "type": "object",
-        "required": ["id", "label"],
+        "required": [
+          "id",
+          "label"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "label": {"type": "string", "minLength": 1},
-          "boundary_type": {"type": "string", "default": "logical"},
-          "description": {"type": ["string", "null"], "default": null},
-          "metadata": {"type": "object", "default": {}},
-          "x": {"type": ["integer", "null"], "default": null},
-          "y": {"type": ["integer", "null"], "default": null},
-          "width": {"type": "integer", "default": 760},
-          "height": {"type": "integer", "default": 420}
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "boundary_type": {
+            "type": "string",
+            "default": "logical"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "metadata": {
+            "type": "object",
+            "default": {}
+          },
+          "x": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "y": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "width": {
+            "type": "integer",
+            "default": 760
+          },
+          "height": {
+            "type": "integer",
+            "default": 420
+          }
         }
       }
     },
@@ -39,27 +112,94 @@
       "default": [],
       "items": {
         "type": "object",
-        "required": ["id", "label"],
+        "required": [
+          "id",
+          "label"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "label": {"type": "string", "minLength": 1},
-          "node_type": {"type": "string", "default": "component"},
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "node_type": {
+            "type": "string",
+            "default": "component"
+          },
           "icon": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "default": null,
             "description": "Service name (e.g. 'azure kubernetes service') resolved via the built-in registry, OR an icon found via draw.io shape search: a full style string containing shape=/image=, a bare mxgraph.<family>.<name> stencil reference, or a bundled img/lib/... SVG path. Rendered as a 40x40 fixed-aspect glyph on the card."
           },
-          "group": {"type": ["string", "null"], "default": null, "description": "Boundary id this node belongs to."},
-          "layer": {"type": ["string", "null"], "default": null},
-          "description": {"type": ["string", "null"], "default": null},
-          "technology": {"type": ["string", "null"], "default": null},
-          "risk_level": {"type": ["string", "null"], "default": null},
-          "metadata": {"type": "object", "default": {}},
-          "x": {"type": ["integer", "null"], "default": null},
-          "y": {"type": ["integer", "null"], "default": null},
-          "width": {"type": "integer", "default": 150},
-          "height": {"type": "integer", "default": 70}
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null,
+            "description": "Boundary id this node belongs to."
+          },
+          "layer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "technology": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "risk_level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "metadata": {
+            "type": "object",
+            "default": {}
+          },
+          "x": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "y": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          },
+          "width": {
+            "type": "integer",
+            "default": 150
+          },
+          "height": {
+            "type": "integer",
+            "default": 70
+          }
         }
       }
     },
@@ -68,22 +208,142 @@
       "default": [],
       "items": {
         "type": "object",
-        "required": ["id", "source", "target", "label"],
+        "required": [
+          "id",
+          "source",
+          "target",
+          "label"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "source": {"type": "string", "minLength": 1, "description": "Existing node id."},
-          "target": {"type": "string", "minLength": 1, "description": "Existing node id."},
-          "label": {"type": "string"},
-          "protocol": {"type": ["string", "null"], "default": null},
-          "direction": {"type": "string", "default": "forward"},
-          "data_classification": {"type": ["string", "null"], "default": null},
-          "security_control": {"type": ["string", "null"], "default": null},
-          "style": {"type": ["string", "null"], "default": null},
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Existing node id."
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Existing node id."
+          },
+          "label": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "direction": {
+            "type": "string",
+            "default": "forward"
+          },
+          "data_classification": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "security_control": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "style": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
           "metadata": {
             "type": "object",
             "default": {},
             "description": "Recognized keys: sequence (int flow number), flow_type (control | target_collection | report_evidence | optional_storage | security_sensitive), display_label."
+          }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "default": [],
+      "description": "Ordered architecture journeys used by the interactive route tracer. Consecutive edges must form a contiguous chain.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "edge_ids"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "edge_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "animation": {
+            "type": "object",
+            "additionalProperties": false,
+            "default": {},
+            "properties": {
+              "style": {
+                "type": "string",
+                "enum": [
+                  "both",
+                  "packet",
+                  "flow"
+                ],
+                "default": "both"
+              },
+              "speed": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 10,
+                "default": 1.0
+              },
+              "dwell_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60000,
+                "default": 350
+              },
+              "loop": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "default": {}
           }
         }
       }
@@ -93,12 +353,25 @@
       "default": [],
       "items": {
         "type": "object",
-        "required": ["label", "meaning"],
+        "required": [
+          "label",
+          "meaning"
+        ],
         "additionalProperties": false,
         "properties": {
-          "label": {"type": "string"},
-          "meaning": {"type": "string"},
-          "color": {"type": ["string", "null"], "default": null}
+          "label": {
+            "type": "string"
+          },
+          "meaning": {
+            "type": "string"
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
         }
       }
     },
@@ -107,19 +380,57 @@
       "default": [],
       "items": {
         "type": "object",
-        "required": ["id", "text"],
+        "required": [
+          "id",
+          "text"
+        ],
         "additionalProperties": false,
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "text": {"type": "string"},
-          "severity": {"type": "string", "default": "info"}
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "default": "info"
+          }
         }
       }
     },
-    "assumptions": {"type": "array", "items": {"type": "string"}, "default": []},
-    "unknowns": {"type": "array", "items": {"type": "string"}, "default": []},
-    "sources": {"type": "array", "items": {"type": "string"}, "default": []},
-    "quality_checks": {"type": "array", "items": {"type": "string"}, "default": []},
-    "metadata": {"type": "object", "default": {}}
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "quality_checks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "metadata": {
+      "type": "object",
+      "default": {}
+    }
   }
 }

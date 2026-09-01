@@ -51,6 +51,34 @@ class Edge:
 
 
 @dataclass(slots=True)
+class RouteAnimation:
+    """Presentation hints for an interactive route journey."""
+
+    style: str = "both"
+    speed: float = 1.0
+    dwell_ms: int = 350
+    loop: bool = False
+
+
+@dataclass(slots=True)
+class Route:
+    """An ordered set of edges that forms one traceable architecture journey.
+
+    Edge ordering is authoritative. Consecutive edges may be traversed in
+    either direction as long as they share the current node, which allows a
+    route to reuse bidirectional architecture relationships without duplicating
+    edges solely for presentation.
+    """
+
+    id: str
+    label: str
+    edge_ids: list[str]
+    description: str | None = None
+    animation: RouteAnimation = field(default_factory=RouteAnimation)
+    metadata: Metadata = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class Boundary:
     """A logical, trust, environment, cloud, or network boundary."""
 
@@ -98,6 +126,7 @@ class Diagram:
     boundaries: list[Boundary] = field(default_factory=list)
     nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
+    routes: list[Route] = field(default_factory=list)
     legends: list[LegendItem] = field(default_factory=list)
     annotations: list[Annotation] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
@@ -112,11 +141,18 @@ class Diagram:
     def boundary_ids(self) -> set[str]:
         return {boundary.id for boundary in self.boundaries}
 
+    def edge_ids(self) -> set[str]:
+        return {edge.id for edge in self.edges}
+
+    def route_ids(self) -> set[str]:
+        return {route.id for route in self.routes}
+
     def all_ids(self) -> list[str]:
         return [
             *[boundary.id for boundary in self.boundaries],
             *[node.id for node in self.nodes],
             *[edge.id for edge in self.edges],
+            *[route.id for route in self.routes],
             *[annotation.id for annotation in self.annotations],
         ]
 
